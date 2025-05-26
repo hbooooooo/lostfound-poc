@@ -6,6 +6,7 @@ import Search from './pages/Search.vue'
 import Activity from './pages/Activity.vue'
 import Admin from './pages/Admin.vue'
 import Login from './pages/Login.vue'
+import TagAdmin from './components/TagAdmin.vue';
 
 const routes = [
   { path: '/login', component: Login },
@@ -13,7 +14,11 @@ const routes = [
   { path: '/record', component: Record },
   { path: '/search', component: Search },
   { path: '/activity', component: Activity },
-  { path: '/admin', component: Admin }
+  { path: '/admin', name: 'TagAdmin', component: TagAdmin },
+  { path: '/admin', component: Admin },
+  { path: '/verify-claim', component: () => import('./pages/VerifyClaim.vue') },
+  { path: '/select-shipping', component: () => import('./pages/SelectShipping.vue') },
+  { path: '/claim/initiate/:item_id', component: () => import('./pages/ClaimForm.vue') }
 ]
 
 const router = createRouter({
@@ -25,13 +30,14 @@ router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
   const isLoggedIn = !!token
 
-  if (to.path === '/login' && isLoggedIn) {
-    next('/')
-  } else if (to.path !== '/login' && !isLoggedIn) {
-    next('/login')
-  } else {
-    next()
-  }
+if (to.path === '/login' && isLoggedIn) {
+  next('/')
+} else if (!['/login', '/verify-claim', '/select-shipping'].includes(to.path) && !isLoggedIn) {
+  next('/login')
+} else {
+  next()
+}
+
 })
 
 

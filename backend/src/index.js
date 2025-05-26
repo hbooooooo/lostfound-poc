@@ -9,6 +9,9 @@ import { fileURLToPath } from 'url';
 import pkg from 'pg';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import claimsRoutes from './routes/claims.js';
+import claimsVerifyRoutes from './routes/claims_verify_routes.js';
+import itemRoutes from './routes/item_and_template_routes.js';
 
 const { Pool } = pkg;
 
@@ -24,6 +27,9 @@ const pool = new Pool({
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/api', itemRoutes);
+app.use('/api/claims', claimsRoutes);
+app.use('/api/claims', claimsVerifyRoutes); // Both under /api/claims
 
 // 📁 File path helpers
 const __filename = fileURLToPath(import.meta.url);
@@ -105,12 +111,12 @@ app.post('/api/ocr', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const filePath = req.file.path;
-    console.log(`📸 Received file at ${filePath}`);
+    // console.log(`📸 Received file at ${filePath}`);
 
     const formData = new FormData();
     formData.append('file', fs.createReadStream(filePath));
 
-    const response = await axios.post('http://ml_service:80/ocr', formData, {
+    const response = await axios.post('http://ml_service/ocr', formData, {
       headers: formData.getHeaders()
     });
 
@@ -151,7 +157,7 @@ app.post('/api/items', authenticateToken, async (req, res) => {
       [
         text,
         tags,
-        embedding,
+        JSON.stringify(embedding),
         location || null,
         foundAt,
         filename || null,
@@ -169,32 +175,79 @@ app.post('/api/items', authenticateToken, async (req, res) => {
   }
 });
 
-// 🔍 Search (limited to user’s org)
 app.post('/api/search', authenticateToken, async (req, res) => {
-  const { keyword, startDate, endDate } = req.body;
+  // process.stdout.write('[💡 /api/search entered]\n');
+  const { keyword, startDate, endDate, embedding } = req.body;
+  // process.stdout.write(`[Keyword check] keyword = "${keyword}"\n`);
 
   try {
-    let query = 'SELECT * FROM found_items WHERE organization_id = $1';
     const params = [req.user.organization_id];
+    let conditions = ['organization_id = $1'];
+    let similarityExpr = 'NULL';
 
-    if (keyword) {
-      params.push(`%${keyword.toLowerCase()}%`);
-      query += ` AND (LOWER(ocr_text) LIKE $${params.length} OR $${params.length} = ANY(tags))`;
+    // 🔤 Keyword block
+    // console.log('[Final Keyword]', keyword, 'Length:', keyword.length);
+
+    if (keyword && keyword.trim().length > 0) {
+      const kw = `%${keyword.trim().toLowerCase()}%`;
+
+      params.push(kw); // ocr_text
+      const ocrIdx = params.length;
+
+      params.push(kw); // tags
+      const tagsIdx = params.length;
+
+      params.push(kw); // location
+      const locIdx = params.length;
+
+      conditions.push(`(
+    LOWER(ocr_text) LIKE $${ocrIdx}
+    OR EXISTS (
+      SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
+    )
+    OR LOWER(location) LIKE $${locIdx}
+  )`);
     }
 
+
+
+    // 🕒 Date range
     if (startDate) {
       params.push(startDate);
-      query += ` AND found_at >= $${params.length}`;
+      conditions.push(`found_at >= $${params.length}`);
     }
 
     if (endDate) {
       params.push(endDate);
-      query += ` AND found_at <= $${params.length}`;
+      conditions.push(`found_at <= $${params.length}`);
     }
 
-    query += ' ORDER BY found_at DESC LIMIT 20';
+    // 🧠 Embedding similarity
+    if (embedding && Array.isArray(embedding) && embedding.length === 512) {
+      const vectorLiteral = `[${embedding.join(',')}]`; // pgvector format requires square brackets
+      params.push(vectorLiteral);
+      similarityExpr = `(-(embedding <#> $${params.length}::vector))`;
+    }
+
+    // console.log('🚩 Vector search embedding type:', typeof embedding, Array.isArray(embedding), embedding?.length);
+    // console.log("🚩 Vector preview (first 3):", embedding?.slice(0, 3));
+
+    // ✅ Final query
+    const query = `
+  SELECT *, ${similarityExpr} AS similarity
+  FROM found_items
+  WHERE ${conditions.join(' AND ')}
+  ORDER BY ${embedding ? 'similarity DESC NULLS LAST' : 'found_at DESC'}
+  LIMIT 20
+`;
+
+
+    // console.log('[Query]', query);
+    // console.log('[Params]', params);
 
     const result = await pool.query(query, params);
+    // console.log('[Results]', result.rows.map(r => r.similarity));
+
     res.json(result.rows);
   } catch (err) {
     console.error('[Search Error]', err);
@@ -207,3 +260,54 @@ app.listen(3000, () => {
   console.log('✅ Backend running on port 3000');
 });
 
+// 🏷️ Expose vocabulary to ml_service
+app.get('/api/tags/vocabulary', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM tag_vocabulary');
+    const tags = result.rows.map(row => row.label);
+    res.json(tags);
+  } catch (err) {
+    console.error('[Vocabulary Error]', err);
+    res.status(500).json({ error: 'Failed to fetch tag vocabulary' });
+  }
+});
+
+app.get('/api/tags/frequent', authenticateToken, async (req, res) => {
+  try {
+    const query = `
+      SELECT unnest(tags) AS tag, COUNT(*) AS count
+      FROM found_items
+      WHERE organization_id = $1
+      GROUP BY tag
+      ORDER BY count DESC
+      LIMIT 50
+    `;
+    const result = await pool.query(query, [req.user.organization_id]);
+    res.json(result.rows);  // [{tag: 'wallet', count: 12}, ...]
+  } catch (err) {
+    console.error('[Tag Aggregation Error]', err);
+    res.status(500).json({ error: 'Could not fetch frequent tags' });
+  }
+});
+
+app.post('/api/tags/vocabulary', authenticateToken, async (req, res) => {
+  const { label } = req.body;
+  try {
+    await pool.query('INSERT INTO tag_vocabulary (label) VALUES ($1) ON CONFLICT DO NOTHING', [label.toLowerCase()]);
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[Add Tag Error]', err);
+    res.status(500).json({ error: 'Failed to add tag' });
+  }
+});
+
+app.delete('/api/tags/vocabulary', authenticateToken, async (req, res) => {
+  const { label } = req.body;
+  try {
+    await pool.query('DELETE FROM tag_vocabulary WHERE label = $1', [label.toLowerCase()]);
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[Delete Tag Error]', err);
+    res.status(500).json({ error: 'Failed to delete tag' });
+  }
+});

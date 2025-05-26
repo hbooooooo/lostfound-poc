@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     host: true,
+    port: 5173,
+    strictPort: true,
+    https: false, // Vue dev server speaks plain HTTP
     proxy: {
       '/api': {
         target: 'http://backend:3000',
@@ -12,11 +15,10 @@ export default defineConfig({
       },
       '/uploads': {
         target: 'http://backend:3000',
-        changeOrigin: true,
-        // Don't rewrite the path!
-        // rewrite: path => path.replace(/^\/uploads/, '')
+        changeOrigin: true
       }
-    }
+    },
+    allowedHosts: ['lost.bouard.com']
   }
 })
     

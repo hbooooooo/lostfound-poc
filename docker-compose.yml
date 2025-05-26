@@ -1,8 +1,8 @@
-version: '3.8'
+#version: '3.8'
 
 services:
   db:
-    image: postgres:15
+    image: ankane/pgvector
     environment:
       POSTGRES_DB: mydb
       POSTGRES_USER: user
@@ -27,9 +27,10 @@ services:
     build:
       context: ./frontend
     ports:
-      - "5173:5173"
+      - "4173:4173"
     volumes:
       - ./frontend:/app
+    command: npm run dev -- --host --port 4173
 
   ml_service:
     build:

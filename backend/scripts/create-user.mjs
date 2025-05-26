@@ -1,3 +1,8 @@
+// docker compose run --rm backend node scripts/create-user.mjs
+// docker compose down -v  # Removes containers + volumes
+// docker compose up --build -d
+
+
 import bcrypt from 'bcrypt';
 import pkg from 'pg';
 

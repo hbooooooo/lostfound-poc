@@ -12,8 +12,10 @@
     <div v-else-if="ocrText || tags.length || embeddings.length || description" class="mt-4 space-y-4">
       <div v-if="description">
         <h2 class="font-semibold">📝 Description:</h2>
-        <p class="bg-gray-100 p-2 rounded text-sm">{{ description }} <span class="text-gray-400 text-xs">({{
-          (descriptionScore * 100).toFixed(1) }}% confidence)</span></p>
+        <p class="bg-gray-100 p-2 rounded text-sm">
+          {{ description }}
+          <span class="text-gray-400 text-xs">({{ (descriptionScore * 100).toFixed(1) }}% confidence)</span>
+        </p>
       </div>
 
       <div v-if="ocrText">
@@ -34,8 +36,8 @@
       </div>
     </div>
 
-    <!-- ➕ New Metadata Form -->
-    <div class="space-y-2">
+    <!-- ➕ Metadata Form -->
+    <div class="space-y-2 mt-4">
       <div>
         <label class="block text-sm font-medium">📍 Location (optional)</label>
         <input v-model="location" type="text" class="w-full border rounded p-2" placeholder="e.g. Terminal B, Gate 7" />
@@ -48,23 +50,22 @@
         ✅ Save Item
       </button>
     </div>
-
   </div>
 </template>
 
 <script>
 import axios from 'axios'
-import { useRouter } from 'vue-router'
 
 export default {
   data() {
     return {
-      description: '',
-      descriptionScore: 0,selectedFile: null,
+      selectedFile: null,
       ocrText: '',
       tags: [],
       embeddings: [],
-      filename: '', // 🆕 Track filename
+      filename: '',
+      description: '',
+      descriptionScore: 0,
       location: '',
       foundAt: new Date().toISOString().slice(0, 16),
       loading: false
@@ -88,6 +89,8 @@ export default {
       this.tags = []
       this.embeddings = []
       this.filename = ''
+      this.description = ''
+      this.descriptionScore = 0
 
       try {
         const response = await axios.post('/api/ocr', formData, {
@@ -100,10 +103,6 @@ export default {
         this.filename = response.data.filename || ''
         this.description = response.data.description || ''
         this.descriptionScore = response.data.description_score || 0
-
-        // ✅ Log filename for debugging
-        console.log('Filename from OCR response:', response.data.filename)
-
       } catch (error) {
         console.error('Upload or OCR failed:', error)
         this.ocrText = '[Error] Upload or OCR failed'
@@ -111,8 +110,14 @@ export default {
         this.loading = false
       }
     },
-
     async submitItem() {
+      const token = localStorage.getItem('token')
+      //console.log('[submitItem] token =', token)
+      if (!token) {
+        alert('You must be logged in to submit an item.')
+        return
+      }
+
       try {
         await axios.post('/api/items', {
           text: this.ocrText,
@@ -120,20 +125,27 @@ export default {
           embedding: this.embeddings,
           location: this.location,
           foundAt: this.foundAt,
-          filename: this.filename // 🆕 Send to backend
-        })
+          filename: this.filename,
+          description: this.description,
+          description_score: this.descriptionScore
+        }, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+
         alert('✅ Item saved!')
 
-        // Reset state
         this.selectedFile = null
         this.ocrText = ''
         this.tags = []
         this.embeddings = []
         this.filename = ''
+        this.description = ''
+        this.descriptionScore = 0
         this.location = ''
         this.foundAt = new Date().toISOString().slice(0, 16)
 
-        // Redirect to portal
         this.$router.push('/')
       } catch (err) {
         console.error('Failed to save item:', err)
