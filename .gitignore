@@ -1,0 +1,51 @@
+# Node.js dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+
+# Upload directories
+uploads/
+*/uploads/
+**/uploads/
+
+# Python cache files
+__pycache__/
+*/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# macOS system files
+.DS_Store
+*.DS_Store
+
+# Additional common exclusions
+# Environment variables and secrets
+.env
+.env.local
+.env.production
+.env.staging
+*.key
+*.pem
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Temporary files
+*.tmp
+*.temp
