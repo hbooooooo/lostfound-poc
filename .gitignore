@@ -48,4 +48,5 @@ out/
 
 # Temporary files
 *.tmp
-*.temp
+*.temp*.zip
+lostfound-poc.zip
