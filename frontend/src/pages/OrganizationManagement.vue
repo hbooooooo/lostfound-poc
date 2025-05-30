@@ -308,22 +308,26 @@ function confirmDelete(org) {
 async function createOrganization() {
   if (submitting.value) return
   
+  console.log('[Frontend] Creating organization:', form.value.name.trim())
   submitting.value = true
   clearMessages()
   
   try {
-    await axios.post('/api/admin/organizations', {
+    const response = await axios.post('/api/admin/organizations', {
       name: form.value.name.trim()
     }, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`
       }
     })
+    console.log('[Frontend] Organization created successfully:', response.data)
     
     success.value = 'Organization created successfully!'
     closeModals()
     await loadOrganizations()
   } catch (err) {
+    console.error('[Frontend] Organization creation failed:', err)
+    console.error('[Frontend] Error response:', err.response?.data)
     error.value = err.response?.data?.error || 'Failed to create organization'
   } finally {
     submitting.value = false

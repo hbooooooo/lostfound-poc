@@ -6,9 +6,9 @@ import FormData from 'form-data';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import pkg from 'pg';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import pool from './db.js';
 import claimsRoutes from './routes/claims.js';
 import claimsVerifyRoutes from './routes/claims_verify_routes.js';
 import itemRoutes from './routes/item_and_template_routes.js';
@@ -18,17 +18,6 @@ import paymentRoutes from './routes/payment_routes.js';
 import progressRoutes from './routes/progress_routes.js';
 import confirmRoute from './routes/payment_confirm_route.js';
 import adminRoutes from './routes/admin_routes.js';
-
-const { Pool } = pkg;
-
-// 📦 DB connection
-const pool = new Pool({
-  user: 'user',
-  host: 'db',
-  database: 'mydb',
-  password: 'password',
-  port: 5432
-});
 
 const app = express();
 app.use(cors());
@@ -41,7 +30,19 @@ app.use('/api', activityRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api', progressRoutes);
 app.use('/api/payment', confirmRoute);
-app.use('/api/admin', adminRoutes);
+// Test route to verify API is working
+app.get('/api/test', (req, res) => {
+  console.log('Test route hit!');
+  res.json({ message: 'API is working' });
+});
+
+console.log('Registering admin routes...');
+try {
+  app.use('/api/admin', authenticateToken, adminRoutes);
+  console.log('Admin routes registered successfully');
+} catch (err) {
+  console.error('Failed to register admin routes:', err);
+}
 
 // 📁 File path helpers
 const __filename = fileURLToPath(import.meta.url);
@@ -252,10 +253,7 @@ app.post('/api/search', authenticateToken, async (req, res) => {
   }
 });
 
-// 🚀 Start server
-app.listen(3000, () => {
-  console.log('✅ Backend running on port 3000');
-});
+// Move app.listen to the end after all routes are defined
 
 // 🏷️ Expose vocabulary to ml_service
 app.get('/api/tags/vocabulary', async (req, res) => {
@@ -331,4 +329,10 @@ app.post('/api/claims/mark-shipped', async (req, res) => {
     console.error('[Mark Shipped Error]', err);
     res.status(500).json({ error: 'Failed to mark item as shipped' });
   }
+});
+
+// 🚀 Start server (moved to end after all routes are defined)
+app.listen(3000, () => {
+  console.log('✅ Backend running on port 3000');
+  console.log('All routes have been registered');
 });

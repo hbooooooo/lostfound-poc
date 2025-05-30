@@ -1,23 +1,11 @@
 import express from 'express';
-import pkg from 'pg';
 import bcrypt from 'bcrypt';
+import pool from '../db.js';
 
-const { Pool } = pkg;
 const router = express.Router();
 
-const pool = new Pool({
-  user: process.env.POSTGRES_USER || 'lostfound',
-  host: process.env.POSTGRES_HOST || 'localhost',
-  database: process.env.POSTGRES_DB || 'lostfound',
-  password: process.env.POSTGRES_PASSWORD || 'password123',
-  port: process.env.POSTGRES_PORT || 5432,
-});
-
-// Middleware to check if user is admin (for now, just check if they exist - you might want more sophisticated role checking)
+// Middleware to check if user is admin (authentication is already handled by route-level middleware)
 function requireAdmin(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
   // For now, any authenticated user can access admin functions
   // In production, you'd want to add role-based access control
   next();
@@ -29,6 +17,7 @@ function requireAdmin(req, res, next) {
 
 // Get all organizations
 router.get('/organizations', requireAdmin, async (req, res) => {
+  console.log('[Admin] Get organizations request from user:', req.user?.username);
   try {
     const result = await pool.query(`
       SELECT o.*, 
@@ -49,13 +38,18 @@ router.get('/organizations', requireAdmin, async (req, res) => {
 
 // Create new organization
 router.post('/organizations', requireAdmin, async (req, res) => {
+  console.log('[Admin] Create organization request:', req.body);
+  console.log('[Admin] User:', req.user);
+  
   const { name } = req.body;
   
   if (!name || name.trim().length === 0) {
+    console.log('[Admin] Organization name validation failed');
     return res.status(400).json({ error: 'Organization name is required' });
   }
   
   try {
+    console.log('[Admin] Attempting to create organization:', name.trim());
     const result = await pool.query(
       'INSERT INTO organizations (name) VALUES ($1) RETURNING *',
       [name.trim()]
