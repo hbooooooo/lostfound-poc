@@ -1,14 +1,16 @@
 <template>
-  <div class="min-h-screen flex flex-col md:flex-row">
+  <div class="min-h-screen flex flex-col md:flex-row bg-gray-50">
     <DesktopSidebar />
 
-    <div class="flex-1 flex flex-col">
+    <div class="flex-1 flex flex-col min-w-0">
       <DesktopHeader :title="title" />
 
-      <main class="flex-grow p-4">
-        <router-view v-slot="{ Component }">
-          <component :is="Component" @set-title="setTitle" />
-        </router-view>
+      <main class="flex-grow overflow-auto pb-20 md:pb-0">
+        <div class="page-container py-6">
+          <router-view v-slot="{ Component }">
+            <component :is="Component" @set-title="setTitle" />
+          </router-view>
+        </div>
       </main>
 
       <MobileNav />

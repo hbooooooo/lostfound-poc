@@ -1,70 +1,127 @@
 <template>
-  <div class="activity-container">
-    <h2>User Activity Dashboard</h2>
-
-    <div class="action-section">
-      <button class="action-btn" @click="goToRecord">➕ Record a New Found Item</button>
-    </div>
-
-    <h3>📦 Items Ready to be Shipped</h3>
-    <div v-if="needsInitiation.length === 0" class="empty-state">✅ No pending items</div>
-    <div v-for="item in needsInitiation" :key="'init-' + item.id" class="result-card">
-      <img
-        v-if="item.filename"
-        :src="`/uploads/${item.filename}`"
-        class="result-image"
-        @click="zoomImage(`/uploads/${item.filename}`)"
-      />
-      <div class="result-details">
-        <h3>{{ item.description }}</h3>
-        <p><strong>Location:</strong> {{ item.location }}</p>
-        <p><strong>Date:</strong> {{ formatDate(item.found_at) }}</p>
-        <div class="tags">
-          <span class="tag orange">📨 Not yet contacted</span>
+  <div>
+    <div class="page-header">
+      <div class="flex justify-between items-start">
+        <div>
+          <h1 class="page-title">Activity Dashboard</h1>
+          <p class="page-description">Track items through the return process</p>
         </div>
-        <button class="action-btn" @click="goToClaim(item.id)">Initiate Return Process</button>
+        <button class="btn btn-primary" @click="goToRecord">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          Record New Item
+        </button>
       </div>
     </div>
 
-    <h3>📬 Items Awaiting Return Initiation</h3>
-    <div v-if="needsShipping.length === 0" class="empty-state">✅ No shipments pending</div>
-    <div v-for="item in needsShipping" :key="'ship-' + item.id" class="result-card">
-      <img
-        v-if="item.filename"
-        :src="`/uploads/${item.filename}`"
-        class="result-image"
-        @click="zoomImage(`/uploads/${item.filename}`)"
-      />
-      <div class="result-details">
-        <h3>{{ item.description }}</h3>
-        <p><strong>Location:</strong> {{ item.location }}</p>
-        <p><strong>Date:</strong> {{ formatDate(item.found_at) }}</p>
-        <div class="tags">
-          <span class="tag green">🧍 Owner identified</span>
-          <span class="tag yellow">✅ T&Cs approved</span>
-          <span class="tag blue">💰 Paid</span>
+    <!-- Items Needing Contact -->
+    <div class="card mb-8">
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+          <svg class="w-5 h-5 mr-2 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2M4 13h2m14 0a1 1 0 00-1-1H5a1 1 0 00-1 1v1a1 1 0 001 1h14a1 1 0 001-1v-1z" />
+          </svg>
+          Items Ready for Return Processing
+        </h2>
+      </div>
+      <div class="card-body">
+        <div v-if="needsInitiation.length === 0" class="empty-state">
+          <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h3 class="empty-state-title">All caught up!</h3>
+          <p class="empty-state-description">No items currently need return initiation</p>
         </div>
-        <a
-          v-if="item.shipping_label"
-          :href="`/labels/${item.shipping_label}`"
-          target="_blank"
-          class="action-btn"
-        >Download Label</a>
-        <button
-          v-if="expandedShipmentId !== item.id"
-          class="action-btn"
-          @click="toggleShipment(item.id)"
-        >
-          Prepare Shipment
-        </button>
-        <div v-if="expandedShipmentId === item.id">
-          <a
-            v-if="item.shipping_label"
-            :href="`/labels/${item.shipping_label}`"
-            target="_blank"
-            class="action-btn"
-          >Download Label</a>
-          <button class="action-btn" @click="markShipped(item.id)">Mark as Ready</button>
+        <div v-else class="item-list">
+          <div v-for="item in needsInitiation" :key="'init-' + item.id" class="item-row">
+            <img
+              v-if="item.filename"
+              :src="`/uploads/${item.filename}`"
+              class="w-24 h-24 object-cover rounded-lg cursor-pointer flex-shrink-0"
+              @click="zoomImage(`/uploads/${item.filename}`)"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between items-start mb-2">
+                <h3 class="text-lg font-medium text-gray-900 truncate">{{ item.description }}</h3>
+                <span class="badge badge-warning ml-2 flex-shrink-0">Pending Contact</span>
+              </div>
+              <div class="space-y-1 text-sm text-gray-600 mb-3">
+                <p><span class="font-medium">Location:</span> {{ item.location }}</p>
+                <p><span class="font-medium">Found:</span> {{ formatDate(item.found_at) }}</p>
+              </div>
+              <button class="btn btn-primary btn-sm" @click="goToClaim(item.id)">
+                Initiate Return Process
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Items Ready for Shipping -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+          <svg class="w-5 h-5 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          Items Ready for Shipping
+        </h2>
+      </div>
+      <div class="card-body">
+        <div v-if="needsShipping.length === 0" class="empty-state">
+          <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h3 class="empty-state-title">No shipments pending</h3>
+          <p class="empty-state-description">All items are up to date</p>
+        </div>
+        <div v-else class="item-list">
+          <div v-for="item in needsShipping" :key="'ship-' + item.id" class="item-row">
+            <img
+              v-if="item.filename"
+              :src="`/uploads/${item.filename}`"
+              class="w-24 h-24 object-cover rounded-lg cursor-pointer flex-shrink-0"
+              @click="zoomImage(`/uploads/${item.filename}`)"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between items-start mb-2">
+                <h3 class="text-lg font-medium text-gray-900 truncate">{{ item.description }}</h3>
+                <div class="flex flex-wrap gap-1 ml-2">
+                  <span class="badge badge-success">Owner ID'd</span>
+                  <span class="badge badge-info">T&Cs OK</span>
+                  <span class="badge badge-info">Paid</span>
+                </div>
+              </div>
+              <div class="space-y-1 text-sm text-gray-600 mb-3">
+                <p><span class="font-medium">Location:</span> {{ item.location }}</p>
+                <p><span class="font-medium">Found:</span> {{ formatDate(item.found_at) }}</p>
+              </div>
+              <div class="space-x-2">
+                <a
+                  v-if="item.shipping_label"
+                  :href="`/labels/${item.shipping_label}`"
+                  target="_blank"
+                  class="btn btn-secondary btn-sm"
+                >Download Label</a>
+                <button
+                  v-if="expandedShipmentId !== item.id"
+                  class="btn btn-primary btn-sm"
+                  @click="toggleShipment(item.id)"
+                >
+                  Prepare Shipment
+                </button>
+                <button
+                  v-if="expandedShipmentId === item.id"
+                  class="btn btn-success btn-sm"
+                  @click="markShipped(item.id)"
+                >
+                  Mark as Ready
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

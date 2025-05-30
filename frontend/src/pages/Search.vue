@@ -1,35 +1,113 @@
 <template>
-  <div class="search-container">
-    <h2>Item Search</h2>
-
-    <form @submit.prevent="submitSearch" class="search-form">
-      <input v-model="keyword" placeholder="Keyword, tag, location..." class="search-input" />
-      <input type="file" @change="handleFileUpload" accept="image/*" />
-      <input type="date" v-model="startDate" />
-      <input type="date" v-model="endDate" />
-      <button type="submit">Search</button>
-    </form>
-
-    <div class="filter-bar">
-      <label><input type="checkbox" v-model="filterStatus.initiated" /> 📨 Email sent</label>
-      <label><input type="checkbox" v-model="filterStatus.verified" /> 🧍 Owner identified</label>
-      <label><input type="checkbox" v-model="filterStatus.shipping" /> ✅ T&Cs approved</label>
-      <label><input type="checkbox" v-model="filterStatus.paid" /> 💰 Paid</label>
-      <label><input type="checkbox" v-model="filterStatus.shipped" /> 🚚 In Transit</label>
-      <label><input type="checkbox" v-model="filterStatus.delivered" /> 📬 Delivered</label>
+  <div>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Search Items</h1>
+        <p class="page-description">Find items using keywords, images, or filters</p>
+      </div>
     </div>
 
-    <div v-if="error" class="error">{{ error }}</div>
-    <div v-if="results.length === 0 && searched">No results found.</div>
+    <!-- Search Form -->
+    <div class="card mb-6">
+      <div class="card-body">
+        <form @submit.prevent="submitSearch" class="space-y-4">
+          <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <div class="lg:col-span-2">
+              <label class="form-label">Search Keywords</label>
+              <input 
+                v-model="keyword" 
+                placeholder="Keywords, tags, location..." 
+                class="form-input" 
+              />
+            </div>
+            <div>
+              <label class="form-label">Start Date</label>
+              <input type="date" v-model="startDate" class="form-input" />
+            </div>
+            <div>
+              <label class="form-label">End Date</label>
+              <input type="date" v-model="endDate" class="form-input" />
+            </div>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-4 items-end">
+            <div class="flex-1">
+              <label class="form-label">Search by Image</label>
+              <input type="file" @change="handleFileUpload" accept="image/*" class="form-input" />
+            </div>
+            <button type="submit" class="btn btn-primary">
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              Search
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-    <div v-for="item in filteredResults" :key="item.id" class="result-card">
-      <img
-        v-if="item.filename"
+    <!-- Filter Bar -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Filter by Status</h3>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" v-model="filterStatus.initiated" class="form-checkbox" />
+            <span class="text-sm text-gray-700">Email Sent</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" v-model="filterStatus.verified" class="form-checkbox" />
+            <span class="text-sm text-gray-700">Owner Identified</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" v-model="filterStatus.shipping" class="form-checkbox" />
+            <span class="text-sm text-gray-700">T&Cs Approved</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" v-model="filterStatus.paid" class="form-checkbox" />
+            <span class="text-sm text-gray-700">Payment Complete</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" v-model="filterStatus.shipped" class="form-checkbox" />
+            <span class="text-sm text-gray-700">In Transit</span>
+          </label>
+          <label class="flex items-center space-x-2 cursor-pointer">
+            <input type="checkbox" v-model="filterStatus.delivered" class="form-checkbox" />
+            <span class="text-sm text-gray-700">Delivered</span>
+          </label>
+        </div>
+      </div>
+    </div>
 
-        :src="`/uploads/${item.filename}`"
-        class="result-image"
-        @click="zoomImage(`/uploads/${item.filename}`)"
-      />
+    <!-- Results Section -->
+    <div v-if="error" class="card mb-6">
+      <div class="card-body">
+        <div class="text-center py-4 text-red-600">
+          <svg class="w-8 h-8 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          {{ error }}
+        </div>
+      </div>
+    </div>
+
+    <div v-else-if="results.length === 0 && searched" class="empty-state">
+      <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+      <h3 class="empty-state-title">No results found</h3>
+      <p class="empty-state-description">Try adjusting your search criteria or filters</p>
+    </div>
+
+    <div v-else class="item-list">
+      <div v-for="item in filteredResults" :key="item.id" class="item-row">
+        <img
+          v-if="item.filename"
+          :src="`/uploads/${item.filename}`"
+          class="w-24 h-24 object-cover rounded-lg cursor-pointer flex-shrink-0"
+          @click="zoomImage(`/uploads/${item.filename}`)"
+        />
       <div class="result-details">
         <h3>{{ item.description }}</h3>
         <p><strong>OCR:</strong> {{ item.ocr_text }}</p>
@@ -51,6 +129,7 @@
             Initiate Return Process
           </button>
         </div>
+      </div>
       </div>
     </div>
 
@@ -91,7 +170,7 @@ const filteredResults = computed(() => {
   const isAnyFilterOn = Object.values(filters).some(v => v)
 
   return results.value.filter(item => {
-    if (!isAnyFilterOn) return true;
+    if (!isAnyFilterOn) return true
 
     return (
       (filters.initiated && item.claim_initiated && !item.verified) ||
@@ -100,18 +179,9 @@ const filteredResults = computed(() => {
       (filters.paid && item.payment_status === 'paid') ||
       (filters.shipped && item.shipped) ||
       (filters.delivered && item.delivered)
-    );
-  });
-    if (!isAnyFilterOn) return true
-
-    return (
-      (filters.verified && item.verified) ||
-      (filters.shipping && item.shipping_confirmed) ||
-      (filters.paid && item.payment_status === 'paid') ||
-      (filters.shipped && item.shipped) ||
-      (filters.delivered && item.delivered)
     )
   })
+})
 
 function handleFileUpload(e) {
   const file = e.target.files[0]
