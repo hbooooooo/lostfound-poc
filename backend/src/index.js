@@ -17,6 +17,7 @@ import activityRoutes from './routes/activity_routes.js';
 import paymentRoutes from './routes/payment_routes.js';
 import progressRoutes from './routes/progress_routes.js';
 import confirmRoute from './routes/payment_confirm_route.js';
+import adminRoutes from './routes/admin_routes.js';
 
 const { Pool } = pkg;
 
@@ -40,6 +41,7 @@ app.use('/api', activityRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api', progressRoutes);
 app.use('/api/payment', confirmRoute);
+app.use('/api/admin', adminRoutes);
 
 // 📁 File path helpers
 const __filename = fileURLToPath(import.meta.url);
