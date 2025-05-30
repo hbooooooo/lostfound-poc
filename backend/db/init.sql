@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS claims (
     email TEXT NOT NULL,
     token TEXT NOT NULL UNIQUE,
     token_expires TIMESTAMP NOT NULL,
+    claim_initiated BOOLEAN DEFAULT FALSE,
     verified BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    shipping_label TEXT,
+    shipping_confirmed BOOLEAN DEFAULT FALSE,
+    tc_agreed BOOLEAN DEFAULT FALSE,
+    payment_session_id TEXT,
+    payment_status TEXT,
+    shipped BOOLEAN DEFAULT FALSE,
+    shipping_address JSONB,
+    delivered BOOLEAN DEFAULT FALSE
 );

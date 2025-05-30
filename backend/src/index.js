@@ -12,6 +12,11 @@ import jwt from 'jsonwebtoken';
 import claimsRoutes from './routes/claims.js';
 import claimsVerifyRoutes from './routes/claims_verify_routes.js';
 import itemRoutes from './routes/item_and_template_routes.js';
+import webhookRoutes from './routes/stripe_webhook.js';
+import activityRoutes from './routes/activity_routes.js';
+import paymentRoutes from './routes/payment_routes.js';
+import progressRoutes from './routes/progress_routes.js';
+import confirmRoute from './routes/payment_confirm_route.js';
 
 const { Pool } = pkg;
 
@@ -30,12 +35,20 @@ app.use(express.json());
 app.use('/api', itemRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/claims', claimsVerifyRoutes); // Both under /api/claims
+app.use(webhookRoutes); // no prefix, Stripe requires exact path
+app.use('/api', activityRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api', progressRoutes);
+app.use('/api/payment', confirmRoute);
 
 // 📁 File path helpers
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const upload = multer({ dest: path.join(__dirname, '../uploads') });
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Until de do better with real labels
+app.use('/labels', express.static(path.join(__dirname, '../labels')));
 
 // 🔐 JWT middleware
 function authenticateToken(req, res, next) {
@@ -176,17 +189,12 @@ app.post('/api/items', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/search', authenticateToken, async (req, res) => {
-  // process.stdout.write('[💡 /api/search entered]\n');
   const { keyword, startDate, endDate, embedding } = req.body;
-  // process.stdout.write(`[Keyword check] keyword = "${keyword}"\n`);
 
   try {
     const params = [req.user.organization_id];
-    let conditions = ['organization_id = $1'];
+    let conditions = ['fi.organization_id = $1'];
     let similarityExpr = 'NULL';
-
-    // 🔤 Keyword block
-    // console.log('[Final Keyword]', keyword, 'Length:', keyword.length);
 
     if (keyword && keyword.trim().length > 0) {
       const kw = `%${keyword.trim().toLowerCase()}%`;
@@ -201,17 +209,14 @@ app.post('/api/search', authenticateToken, async (req, res) => {
       const locIdx = params.length;
 
       conditions.push(`(
-    LOWER(ocr_text) LIKE $${ocrIdx}
-    OR EXISTS (
-      SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
-    )
-    OR LOWER(location) LIKE $${locIdx}
-  )`);
+        LOWER(ocr_text) LIKE $${ocrIdx}
+        OR EXISTS (
+          SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
+        )
+        OR LOWER(location) LIKE $${locIdx}
+      )`);
     }
 
-
-
-    // 🕒 Date range
     if (startDate) {
       params.push(startDate);
       conditions.push(`found_at >= $${params.length}`);
@@ -222,32 +227,22 @@ app.post('/api/search', authenticateToken, async (req, res) => {
       conditions.push(`found_at <= $${params.length}`);
     }
 
-    // 🧠 Embedding similarity
     if (embedding && Array.isArray(embedding) && embedding.length === 512) {
-      const vectorLiteral = `[${embedding.join(',')}]`; // pgvector format requires square brackets
+      const vectorLiteral = `[${embedding.join(',')}]`;
       params.push(vectorLiteral);
       similarityExpr = `(-(embedding <#> $${params.length}::vector))`;
     }
 
-    // console.log('🚩 Vector search embedding type:', typeof embedding, Array.isArray(embedding), embedding?.length);
-    // console.log("🚩 Vector preview (first 3):", embedding?.slice(0, 3));
-
-    // ✅ Final query
     const query = `
-  SELECT *, ${similarityExpr} AS similarity
-  FROM found_items
-  WHERE ${conditions.join(' AND ')}
-  ORDER BY ${embedding ? 'similarity DESC NULLS LAST' : 'found_at DESC'}
-  LIMIT 20
-`;
-
-
-    // console.log('[Query]', query);
-    // console.log('[Params]', params);
+      SELECT fi.*, c.claim_initiated, c.verified, c.shipping_confirmed, c.payment_status, c.shipped, ${similarityExpr} AS similarity
+      FROM found_items fi
+      LEFT JOIN claims c ON c.item_id = fi.id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY ${embedding ? 'similarity DESC NULLS LAST' : 'found_at DESC'}
+      LIMIT 20
+    `;
 
     const result = await pool.query(query, params);
-    // console.log('[Results]', result.rows.map(r => r.similarity));
-
     res.json(result.rows);
   } catch (err) {
     console.error('[Search Error]', err);
@@ -309,5 +304,29 @@ app.delete('/api/tags/vocabulary', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[Delete Tag Error]', err);
     res.status(500).json({ error: 'Failed to delete tag' });
+  }
+});
+
+app.post('/api/claims/mark-shipped', async (req, res) => {
+  const { item_id } = req.body;
+  if (!item_id) return res.status(400).json({ error: 'Missing item_id' });
+  // Assigned a MOCK LABEL for now
+  try {
+    const result = await pool.query(
+      `UPDATE claims
+       SET shipped = true, shipping_label = 'mock-label.pdf'
+       WHERE item_id = $1`,
+      [item_id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Claim not found for item_id' });
+    }
+
+    console.log(`📦 Marked item ${item_id} as shipped and assigned label`);
+    res.json({ status: 'ok' });
+  } catch (err) {
+    console.error('[Mark Shipped Error]', err);
+    res.status(500).json({ error: 'Failed to mark item as shipped' });
   }
 });

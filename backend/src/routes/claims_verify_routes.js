@@ -42,10 +42,6 @@ router.get('/verify', async (req, res) => {
       return res.status(403).json({ error: 'Token expired' });
     }
 
-    if (claim.verified) {
-      return res.status(409).json({ error: 'Already verified' });
-    }
-
     return res.json({ claim });
   } catch (err) {
     console.error('GET /verify error:', err);

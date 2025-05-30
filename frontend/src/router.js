@@ -1,24 +1,48 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import MainLayout from './layouts/MainLayout.vue'
+import GuestLayout from './layouts/GuestLayout.vue'
+
 import Portal from './pages/Portal.vue'
 import Record from './pages/Record.vue'
 import Search from './pages/Search.vue'
 import Activity from './pages/Activity.vue'
 import Admin from './pages/Admin.vue'
 import Login from './pages/Login.vue'
-import TagAdmin from './components/TagAdmin.vue';
+import VerifyClaim from './pages/VerifyClaim.vue'
+import SelectShipping from './pages/SelectShipping.vue'
+import ClaimForm from './pages/ClaimForm.vue'
+import TagAdmin from './components/TagAdmin.vue'
+import PaymentSuccess from './pages/PaymentSuccess.vue'
+import PaymentCancelled from './pages/PaymentCancelled.vue'
 
 const routes = [
   { path: '/login', component: Login },
-  { path: '/', component: Portal },
-  { path: '/record', component: Record },
-  { path: '/search', component: Search },
-  { path: '/activity', component: Activity },
-  { path: '/admin', name: 'TagAdmin', component: TagAdmin },
-  { path: '/admin', component: Admin },
-  { path: '/verify-claim', component: () => import('./pages/VerifyClaim.vue') },
-  { path: '/select-shipping', component: () => import('./pages/SelectShipping.vue') },
-  { path: '/claim/initiate/:item_id', component: () => import('./pages/ClaimForm.vue') }
+
+  {
+    path: '/',
+    component: MainLayout,
+    children: [
+      { path: '', component: Portal },
+      { path: 'record', component: Record },
+      { path: 'search', component: Search },
+      { path: 'activity', component: Activity },
+      { path: 'admin', name: 'TagAdmin', component: TagAdmin },
+      { path: 'admin-panel', component: Admin },
+      { path: 'claim/initiate/:item_id', component: ClaimForm }
+    ]
+  },
+
+  {
+    path: '/',
+    component: GuestLayout,
+    children: [
+      { path: 'verify-claim', component: VerifyClaim },
+      { path: 'select-shipping', component: SelectShipping },
+      { path: 'payment-success', component: PaymentSuccess },
+      { path: 'payment-cancelled', component: PaymentCancelled }
+    ]
+  }
 ]
 
 const router = createRouter({
@@ -26,18 +50,25 @@ const router = createRouter({
   routes
 })
 
+const guestPages = [
+  '/login',
+  '/verify-claim',
+  '/select-shipping',
+  '/payment-success',
+  '/payment-cancelled'
+]
+
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
   const isLoggedIn = !!token
 
-if (to.path === '/login' && isLoggedIn) {
-  next('/')
-} else if (!['/login', '/verify-claim', '/select-shipping'].includes(to.path) && !isLoggedIn) {
-  next('/login')
-} else {
-  next()
-}
-
+  if (to.path === '/login' && isLoggedIn) {
+    next('/')
+  } else if (!guestPages.includes(to.path) && !isLoggedIn) {
+    next('/login')
+  } else {
+    next()
+  }
 })
 
 

@@ -11,7 +11,6 @@
     </form>
 
     <div class="filter-bar">
-      <label><input type="checkbox" v-model="filterStatus.initiated" /> 📨 Email sent</label>
       <label><input type="checkbox" v-model="filterStatus.verified" /> 🧍 Owner identified</label>
       <label><input type="checkbox" v-model="filterStatus.shipping" /> ✅ T&Cs approved</label>
       <label><input type="checkbox" v-model="filterStatus.paid" /> 💰 Paid</label>
@@ -25,7 +24,6 @@
     <div v-for="item in filteredResults" :key="item.id" class="result-card">
       <img
         v-if="item.filename"
-
         :src="`/uploads/${item.filename}`"
         class="result-image"
         @click="zoomImage(`/uploads/${item.filename}`)"
@@ -38,7 +36,6 @@
         <p><strong>Date:</strong> {{ formatDate(item.found_at) }}</p>
 
         <div class="tags">
-          <span v-if="item.claim_initiated && !item.verified" class="tag orange">📨 Email sent</span>
           <span v-if="item.verified" class="tag green">🧍 Owner identified</span>
           <span v-if="item.shipping_confirmed" class="tag yellow">✅ T&Cs approved</span>
           <span v-if="item.payment_status === 'paid'" class="tag blue">💰 Paid</span>
@@ -82,8 +79,7 @@ const filterStatus = ref({
   shipping: false,
   paid: false,
   shipped: false,
-  delivered: false,
-  initiated: false
+  delivered: false
 })
 
 const filteredResults = computed(() => {
@@ -91,17 +87,6 @@ const filteredResults = computed(() => {
   const isAnyFilterOn = Object.values(filters).some(v => v)
 
   return results.value.filter(item => {
-    if (!isAnyFilterOn) return true;
-
-    return (
-      (filters.initiated && item.claim_initiated && !item.verified) ||
-      (filters.verified && item.verified) ||
-      (filters.shipping && item.shipping_confirmed) ||
-      (filters.paid && item.payment_status === 'paid') ||
-      (filters.shipped && item.shipped) ||
-      (filters.delivered && item.delivered)
-    );
-  });
     if (!isAnyFilterOn) return true
 
     return (
@@ -112,6 +97,7 @@ const filteredResults = computed(() => {
       (filters.delivered && item.delivered)
     )
   })
+})
 
 function handleFileUpload(e) {
   const file = e.target.files[0]
@@ -259,6 +245,4 @@ function formatDate(dateStr) {
   color: red;
   margin-bottom: 1rem;
 }
-
-.orange { background-color: #fff4e5; color: #92400e; }
 </style>

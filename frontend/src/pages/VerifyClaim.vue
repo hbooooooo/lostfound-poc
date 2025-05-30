@@ -27,8 +27,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import axios from 'axios'
+import { useRouter } from 'vue-router'
 
 const token = new URLSearchParams(window.location.search).get('token')
+const router = useRouter()
+
 const claim = ref(null)
 const agreed = ref(false)
 const success = ref('')
@@ -50,6 +53,10 @@ async function submitVerification() {
   try {
     const res = await axios.post('/api/claims/verify', { token })
     success.value = res.data.message
+    localStorage.setItem('guest_token', token)
+    setTimeout(() => {
+      router.push({ path: '/select-shipping', query: { token } })
+    }, 1000)
   } catch (err) {
     error.value = err.response?.data?.error || 'Verification failed'
   }

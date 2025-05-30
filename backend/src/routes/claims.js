@@ -45,8 +45,8 @@ router.post('/initiate', async (req, res) => {
 
   try {
     await pool.query(
-      `INSERT INTO claims (item_id, email, token, token_expires)
-       VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO claims (item_id, email, token, token_expires, claim_initiated)
+       VALUES ($1, $2, $3, $4, true)`,
       [item_id, email, token, expires]
     );
 
