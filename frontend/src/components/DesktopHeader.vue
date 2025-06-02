@@ -1,5 +1,5 @@
 <template>
-  <header class="hidden md:flex items-center justify-between bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
+  <header class="hidden md:flex items-center justify-between bg-white border-b border-gray-200 h-16 px-4 shadow-sm">
     <!-- Center: Page Title -->
     <div class="flex-1">
       <h1 class="text-xl font-semibold text-gray-900">{{ title || 'Dashboard' }}</h1>
