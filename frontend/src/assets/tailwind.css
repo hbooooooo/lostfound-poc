@@ -1,3 +1,4 @@
+/* Mobile Typography Update - v2.2 - Refined Sizing */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,10 +6,23 @@
 @layer base {
   html {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    /* Set slightly larger base font size for mobile */
+    font-size: 17px;
+  }
+  
+  /* Reset to normal size for landscape tablets and up */
+  @media (orientation: landscape) and (min-width: 768px) {
+    html {
+      font-size: 16px;
+    }
   }
   
   body {
     @apply bg-gray-50 text-gray-900;
+    /* Improve text rendering on mobile */
+    -webkit-text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
@@ -207,7 +221,8 @@
 }
 
 /* Mobile-specific adjustments */
-@media (max-width: 768px) {
+@media (orientation: portrait),
+(max-width: 768px) {
   .page-container {
     @apply px-3;
   }
@@ -218,5 +233,45 @@
   
   .card-header, .card-footer {
     @apply px-4 py-3;
+  }
+  
+  /* Mobile typography improvements */
+  .btn {
+    @apply text-base px-5 py-3;
+  }
+  
+  .form-input, .form-select {
+    @apply text-base py-3;
+  }
+  
+  .form-label {
+    @apply text-base;
+  }
+  
+  .page-title {
+    @apply text-3xl;
+  }
+  
+  .page-description {
+    @apply text-base;
+  }
+  
+  .card-header h2, .card-header h3 {
+    @apply text-xl;
+  }
+  
+  /* Ensure minimum touch targets */
+  .mobile-nav-link {
+    min-height: 48px;
+    min-width: 48px;
+  }
+  
+  /* Better spacing for readability */
+  .space-y-4 > * + * {
+    margin-top: 1.5rem;
+  }
+  
+  .space-y-6 > * + * {
+    margin-top: 2rem;
   }
 }

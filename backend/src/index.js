@@ -21,7 +21,8 @@ import adminRoutes from './routes/admin_routes.js';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 app.use('/api', itemRoutes);
 app.use('/api/claims', claimsRoutes);
 app.use('/api/claims', claimsVerifyRoutes); // Both under /api/claims
@@ -47,7 +48,12 @@ try {
 // 📁 File path helpers
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const upload = multer({ dest: path.join(__dirname, '../uploads') });
+const upload = multer({ 
+  dest: path.join(__dirname, '../uploads'),
+  limits: {
+    fileSize: 20 * 1024 * 1024 // 20MB limit
+  }
+});
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Until de do better with real labels
@@ -133,7 +139,8 @@ app.post('/api/ocr', upload.single('file'), async (req, res) => {
     formData.append('file', fs.createReadStream(filePath));
 
     const response = await axios.post('http://ml_service/ocr', formData, {
-      headers: formData.getHeaders()
+      headers: formData.getHeaders(),
+      timeout: 120000  // 2 minute timeout for OCR processing
     });
 
     res.json({
@@ -221,12 +228,14 @@ app.post('/api/search', authenticateToken, async (req, res) => {
     }
 
     if (startDate) {
-      params.push(startDate);
+      // Start of day: YYYY-MM-DD 00:00:00
+      params.push(startDate + ' 00:00:00');
       conditions.push(`found_at >= $${params.length}`);
     }
 
     if (endDate) {
-      params.push(endDate);
+      // End of day: YYYY-MM-DD 23:59:59.999
+      params.push(endDate + ' 23:59:59.999');
       conditions.push(`found_at <= $${params.length}`);
     }
 

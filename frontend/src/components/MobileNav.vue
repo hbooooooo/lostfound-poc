@@ -1,6 +1,6 @@
 <template>
   <nav class="mobile-nav fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 shadow-lg">
-    <div class="flex justify-around py-2">
+    <div class="flex justify-around py-3">
 
       <router-link to="/"
         class="mobile-nav-link flex flex-col items-center py-2 px-3 rounded-lg transition-colors"
@@ -56,8 +56,8 @@ nav.mobile-nav {
   display: none;
 }
 
-@media (max-width: 768px),
-(pointer: coarse) {
+@media (orientation: portrait),
+(max-width: 768px) {
   nav.mobile-nav {
     display: block;
   }

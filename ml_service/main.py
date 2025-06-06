@@ -1,15 +1,47 @@
+import os
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
+from paddleocr import PaddleOCR  # Add this import at the beginning of the file
+from paddle_ocr import paddle_ocr
 import pytesseract
 import io
 import requests
 import torch
-from transformers import CLIPProcessor, CLIPModel, BlipProcessor, BlipForConditionalGeneration
+from transformers import (
+    CLIPProcessor, CLIPModel,
+    BlipProcessor, BlipForConditionalGeneration
+)
 import cv2
 import numpy as np
 
+# Point d'accès FastAPI
 app = FastAPI()
+
+# 🔁 Load models from local cache (set via environment)
+HF_CACHE = os.getenv("TRANSFORMERS_CACHE", "/root/.cache/huggingface")
+PADDLE_CACHE = os.getenv("PADDLE_MODEL_PATH", "/root/.cache/paddleocr")
+
+print("Loading CLIP model...")
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
+
+print("Loading BLIP model...")
+blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
+blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
+
+print("✅ All models loaded successfully!")
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
+
+blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
+blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
+
+ocr_model = PaddleOCR(use_angle_cls=True, lang='en', det_db_box_thresh=0.3, use_gpu=False, 
+                      det_model_dir=os.path.join(PADDLE_CACHE, "en_PP-OCRv3_det_infer"),
+                      rec_model_dir=os.path.join(PADDLE_CACHE, "en_PP-OCRv3_rec_infer"),
+                      cls_model_dir=os.path.join(PADDLE_CACHE, "ch_ppocr_mobile_v2.0_cls_infer"))
+
 
 def preprocess_image_for_ocr(image):
     """
@@ -295,15 +327,13 @@ def fetch_tag_vocabulary():
 
 # Load models at startup (as before)
 print("Loading CLIP model...")
-clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
 
 print("Loading BLIP model...")
-blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large")
-blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large")
+blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
+blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
 
-print("✅ All models loaded successfully!")
-# blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
 # blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
 # Goal	Approach
@@ -330,8 +360,10 @@ async def perform_ocr(file: UploadFile = File(...)):
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
 
-        # Intelligent OCR step with preprocessing and adaptive PSM
-        text, ocr_confidence, ocr_info = perform_intelligent_ocr(image)
+        # Intelligent OCR step using smart OCR pipeline
+        text = paddle_ocr(image)
+        ocr_confidence = 0.8
+        ocr_info = {"method": "smart_pipeline"}
 
         # ⏬ Get up-to-date tag labels from DB
         candidate_labels = fetch_tag_vocabulary()
@@ -398,4 +430,3 @@ async def perform_ocr(file: UploadFile = File(...)):
                 "ocr_info": {"error": str(e)}
             }
         )
-

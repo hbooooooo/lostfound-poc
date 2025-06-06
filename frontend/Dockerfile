@@ -5,9 +5,9 @@ WORKDIR /app
 # Copy full package manifest first
 COPY package*.json ./
 
-# Install ALL dependencies (including devDependencies)
-ENV NODE_ENV=development
-RUN npm install
+# Install ALL dependencies explicitly with NODE_ENV
+RUN npm install --include=dev
+
 
 # Copy everything else
 COPY . .
@@ -16,7 +16,8 @@ COPY . .
 RUN [ -d node_modules/tailwindcss ] && echo "✅ Tailwind installed" || (echo "❌ Tailwind missing" && exit 1)
 
 # Expose Vite dev server
-EXPOSE 5173
+EXPOSE 4173
 
 # Start the Vite dev server
-CMD ["npm", "run", "dev", "--", "--host"]
+CMD ["npx", "vite", "--host", "--port", "4173"]
+

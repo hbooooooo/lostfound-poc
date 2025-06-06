@@ -20,16 +20,14 @@ const pool = new Pool({
 const run = async () => {
 
   await pool.query(`
-  ALTER TABLE claims
-  ADD COLUMN IF NOT EXISTS shipped BOOLEAN DEFAULT FALSE;
+CREATE TABLE IF NOT EXISTS tag_vocabulary (
+  id SERIAL PRIMARY KEY,
+  label TEXT NOT NULL UNIQUE,
+  lang TEXT DEFAULT 'en'
+);
     `);
 
   console.log('✅ DB updated!');
-
-  await pool.query(
-    `
-    SELECT item_id, shipping_label, shipped FROM claims WHERE shipping_label IS NOT NULL;
-`);
 
   process.exit();
 };

@@ -16,7 +16,16 @@
         <div class="space-y-4">
           <div>
             <label class="form-label">Select Image File</label>
-            <input ref="fileInput" type="file" @change="handleFileChange" class="form-input" accept="image/*" />
+            <input ref="fileInput" type="file" @change="handleFileChange" class="form-input" accept="image/*,.heic,.HEIC" />
+          </div>
+          
+          <!-- Thumbnail Preview -->
+          <div v-if="thumbnailUrl" class="mt-4">
+            <label class="form-label">Preview</label>
+            <div class="border border-gray-300 rounded-lg p-4 bg-gray-50">
+              <img :src="thumbnailUrl" alt="Preview" class="max-w-xs max-h-48 rounded shadow-sm" />
+              <p class="text-sm text-gray-600 mt-2">{{ selectedFileName }}</p>
+            </div>
           </div>
           <button 
             @click="uploadFile" 
@@ -139,11 +148,14 @@
 
 <script>
 import axios from 'axios'
+import heic2any from 'heic2any'
 
 export default {
   data() {
     return {
       selectedFile: null,
+      thumbnailUrl: null,
+      selectedFileName: '',
       ocrText: '',
       tags: [],
       embeddings: [],
@@ -159,8 +171,60 @@ export default {
     this.$emit('set-title', 'Record New Item')
   },
   methods: {
-    handleFileChange(e) {
-      this.selectedFile = e.target.files[0]
+    async handleFileChange(e) {
+      const file = e.target.files[0]
+      if (!file) return
+
+      this.selectedFileName = file.name
+      
+      // Check if it's a HEIC file and convert it
+      if (file.type === 'image/heic' || file.name.toLowerCase().endsWith('.heic')) {
+        try {
+          console.log('Converting HEIC file to JPEG...', {
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type
+          })
+          
+          // Add file size check (limit to 15MB to leave headroom for server limit)
+          if (file.size > 15 * 1024 * 1024) {
+            alert('File too large. Please select a file smaller than 15MB.')
+            return
+          }
+          
+          const convertedBlob = await heic2any({
+            blob: file,
+            toType: 'image/jpeg',
+            quality: 0.8
+          })
+          
+          console.log('HEIC conversion successful', {
+            originalSize: file.size,
+            convertedSize: convertedBlob.size
+          })
+          
+          // Create a new File object from the converted blob
+          this.selectedFile = new File([convertedBlob], file.name.replace(/\.heic$/i, '.jpg'), {
+            type: 'image/jpeg'
+          })
+        } catch (error) {
+          console.error('HEIC conversion failed:', error)
+          alert(`Failed to convert HEIC file: ${error.message}. Please try a different image format.`)
+          return
+        }
+      } else {
+        this.selectedFile = file
+      }
+
+      // Create thumbnail preview
+      this.createThumbnail(this.selectedFile)
+    },
+    
+    createThumbnail(file) {
+      if (this.thumbnailUrl) {
+        URL.revokeObjectURL(this.thumbnailUrl)
+      }
+      this.thumbnailUrl = URL.createObjectURL(file)
     },
     async uploadFile() {
       if (!this.selectedFile) return
@@ -177,10 +241,18 @@ export default {
       this.descriptionScore = 0
 
       try {
+        console.log('Uploading file for OCR processing...', {
+          fileName: this.selectedFile.name,
+          fileSize: this.selectedFile.size,
+          fileType: this.selectedFile.type
+        })
+        
         const response = await axios.post('/api/ocr', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         })
 
+        console.log('OCR response received:', response.data)
+        
         this.ocrText = response.data.text || ''
         this.tags = response.data.tags || []
         this.embeddings = response.data.embedding || []
@@ -189,7 +261,16 @@ export default {
         this.descriptionScore = response.data.description_score || 0
       } catch (error) {
         console.error('Upload or OCR failed:', error)
-        this.ocrText = '[Error] Upload or OCR failed'
+        if (error.response) {
+          console.error('Server response:', error.response.status, error.response.data)
+          this.ocrText = `[Error] Server error: ${error.response.status} - ${error.response.data?.message || 'Unknown error'}`
+        } else if (error.request) {
+          console.error('No response received:', error.request)
+          this.ocrText = '[Error] No response from server'
+        } else {
+          console.error('Request setup error:', error.message)
+          this.ocrText = `[Error] Request failed: ${error.message}`
+        }
       } finally {
         this.loading = false
       }
@@ -220,7 +301,13 @@ export default {
 
         alert('✅ Item saved!')
 
+        // Clear all form data
         this.selectedFile = null
+        this.selectedFileName = ''
+        if (this.thumbnailUrl) {
+          URL.revokeObjectURL(this.thumbnailUrl)
+          this.thumbnailUrl = null
+        }
         this.ocrText = ''
         this.tags = []
         this.embeddings = []
@@ -229,12 +316,21 @@ export default {
         this.descriptionScore = 0
         this.location = ''
         this.foundAt = new Date().toISOString().slice(0, 16)
+        
+        // Clear file input
+        this.$refs.fileInput.value = ''
 
         this.$router.push('/')
       } catch (err) {
         console.error('Failed to save item:', err)
         alert('❌ Failed to save item')
       }
+    }
+  },
+  beforeUnmount() {
+    // Clean up thumbnail URL when component is destroyed
+    if (this.thumbnailUrl) {
+      URL.revokeObjectURL(this.thumbnailUrl)
     }
   }
 }

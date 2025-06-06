@@ -1,5 +1,5 @@
 <template>
-  <nav class="bg-white border-r border-gray-200 min-h-screen w-64 hidden md:flex flex-col shadow-sm">
+  <nav class="bg-white border-r border-gray-200 min-h-screen w-64 hidden landscape:md:flex flex-col shadow-sm">
     <!-- Logo Section -->
     <div class="h-16 flex justify-center items-center border-b border-gray-200">
       <router-link to="/" class="flex justify-center py-4">

@@ -1,0 +1,11 @@
+tar --exclude='.claude.*' \
+    --exclude='.git' \
+    --exclude='**/node_modules' \
+    --exclude='**/uploads' \
+    --exclude='**/__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='*.pyo' \
+    --exclude='*.DS_Store' \
+    --exclude='*.tar' \
+    --exclude='*.pem' \
+    -cvf lostfound-poc.tar .
