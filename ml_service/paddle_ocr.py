@@ -4,7 +4,7 @@ from PIL import Image
 import numpy as np
 
 # Load once at module level
-ocr_model = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False)
+ocr_model = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=True)
 
 def paddle_ocr(image: Image.Image) -> str:
     img_array = np.array(image.convert("RGB"))

@@ -37,7 +37,7 @@ clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", c
 blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
 blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
 
-ocr_model = PaddleOCR(use_angle_cls=True, lang='en', det_db_box_thresh=0.3, use_gpu=False, 
+ocr_model = PaddleOCR(use_angle_cls=True, lang='en', det_db_box_thresh=0.3, use_gpu=True, 
                       det_model_dir=os.path.join(PADDLE_CACHE, "en_PP-OCRv3_det_infer"),
                       rec_model_dir=os.path.join(PADDLE_CACHE, "en_PP-OCRv3_rec_infer"),
                       cls_model_dir=os.path.join(PADDLE_CACHE, "ch_ppocr_mobile_v2.0_cls_infer"))
