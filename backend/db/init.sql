@@ -5,7 +5,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- 1. Organizations table
 CREATE TABLE IF NOT EXISTS organizations (
     id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    origin_address JSONB
 );
 
 -- 2. Users table

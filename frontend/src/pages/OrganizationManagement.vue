@@ -143,7 +143,7 @@
 
     <!-- Create/Edit Organization Modal -->
     <div v-if="showCreateModal || showEditModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div class="bg-white rounded-lg shadow-xl max-w-md w-full">
+      <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div class="border-b border-gray-200 px-6 py-4">
           <div class="flex justify-between items-center">
             <h3 class="text-lg font-semibold text-gray-900">
@@ -157,7 +157,7 @@
           </div>
         </div>
         <form @submit.prevent="showEditModal ? updateOrganization() : createOrganization()">
-          <div class="px-6 py-4">
+          <div class="px-6 py-4 space-y-6">
             <div>
               <label class="form-label">Organization Name *</label>
               <input 
@@ -168,6 +168,102 @@
                 placeholder="Enter organization name"
                 :disabled="submitting"
               />
+            </div>
+            
+            <!-- Origin Address Section -->
+            <div>
+              <h4 class="text-sm font-medium text-gray-900 mb-4">Origin Address (Optional)</h4>
+              <div class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div class="md:col-span-2">
+                    <label class="form-label">Street Address</label>
+                    <input 
+                      v-model="form.origin_address.street" 
+                      type="text" 
+                      class="form-input"
+                      placeholder="123 Main Street"
+                      :disabled="submitting"
+                    />
+                  </div>
+                  
+                  <div class="md:col-span-2">
+                    <label class="form-label">Apartment, Suite, etc.</label>
+                    <input 
+                      v-model="form.origin_address.street2" 
+                      type="text" 
+                      class="form-input"
+                      placeholder="Apt 4B"
+                      :disabled="submitting"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label class="form-label">City</label>
+                    <input 
+                      v-model="form.origin_address.city" 
+                      type="text" 
+                      class="form-input"
+                      placeholder="New York"
+                      :disabled="submitting"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label class="form-label">Postal Code</label>
+                    <input 
+                      v-model="form.origin_address.postalCode" 
+                      type="text" 
+                      class="form-input"
+                      placeholder="10001"
+                      :disabled="submitting"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label class="form-label">State/Province</label>
+                    <input 
+                      v-model="form.origin_address.state" 
+                      type="text" 
+                      class="form-input"
+                      placeholder="NY"
+                      :disabled="submitting"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label class="form-label">Country</label>
+                    <select 
+                      v-model="form.origin_address.country" 
+                      class="form-input"
+                      :disabled="submitting"
+                    >
+                      <option value="">Select Country</option>
+                      <option value="US">United States</option>
+                      <option value="CA">Canada</option>
+                      <option value="FR">France</option>
+                      <option value="DE">Germany</option>
+                      <option value="GB">United Kingdom</option>
+                      <option value="IT">Italy</option>
+                      <option value="ES">Spain</option>
+                      <option value="NL">Netherlands</option>
+                      <option value="BE">Belgium</option>
+                      <option value="CH">Switzerland</option>
+                      <option value="AT">Austria</option>
+                    </select>
+                  </div>
+                  
+                  <div class="md:col-span-2">
+                    <label class="form-label">Phone Number</label>
+                    <input 
+                      v-model="form.origin_address.phone" 
+                      type="tel" 
+                      class="form-input"
+                      placeholder="+1 (555) 123-4567"
+                      :disabled="submitting"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="border-t border-gray-200 px-6 py-4 flex justify-end space-x-3">
@@ -257,7 +353,16 @@ const organizationToDelete = ref(null)
 const editingOrganization = ref(null)
 
 const form = ref({
-  name: ''
+  name: '',
+  origin_address: {
+    street: '',
+    street2: '',
+    city: '',
+    postalCode: '',
+    state: '',
+    country: '',
+    phone: ''
+  }
 })
 
 async function loadOrganizations() {
@@ -289,12 +394,30 @@ function closeModals() {
   showDeleteModal.value = false
   editingOrganization.value = null
   form.value.name = ''
+  form.value.origin_address = {
+    street: '',
+    street2: '',
+    city: '',
+    postalCode: '',
+    state: '',
+    country: '',
+    phone: ''
+  }
   clearMessages()
 }
 
 function editOrganization(org) {
   editingOrganization.value = org
   form.value.name = org.name
+  form.value.origin_address = org.origin_address || {
+    street: '',
+    street2: '',
+    city: '',
+    postalCode: '',
+    state: '',
+    country: '',
+    phone: ''
+  }
   showEditModal.value = true
   clearMessages()
 }
@@ -314,7 +437,8 @@ async function createOrganization() {
   
   try {
     const response = await axios.post('/api/admin/organizations', {
-      name: form.value.name.trim()
+      name: form.value.name.trim(),
+      origin_address: form.value.origin_address
     }, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -342,7 +466,8 @@ async function updateOrganization() {
   
   try {
     await axios.put(`/api/admin/organizations/${editingOrganization.value.id}`, {
-      name: form.value.name.trim()
+      name: form.value.name.trim(),
+      origin_address: form.value.origin_address
     }, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`

@@ -10,6 +10,7 @@ import Activity from './pages/Activity.vue'
 import Admin from './pages/Admin.vue'
 import Login from './pages/Login.vue'
 import VerifyClaim from './pages/VerifyClaim.vue'
+import EnterAddress from './pages/EnterAddress.vue'
 import SelectShipping from './pages/SelectShipping.vue'
 import ClaimForm from './pages/ClaimForm.vue'
 import TagAdmin from './components/TagAdmin.vue'
@@ -42,6 +43,7 @@ const routes = [
     component: GuestLayout,
     children: [
       { path: 'verify-claim', component: VerifyClaim },
+      { path: 'enter-address', component: EnterAddress },
       { path: 'select-shipping', component: SelectShipping },
       { path: 'payment-success', component: PaymentSuccess },
       { path: 'payment-cancelled', component: PaymentCancelled }
@@ -57,6 +59,7 @@ const router = createRouter({
 const guestPages = [
   '/login',
   '/verify-claim',
+  '/enter-address',
   '/select-shipping',
   '/payment-success',
   '/payment-cancelled'

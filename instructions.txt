@@ -1,0 +1,10 @@
+OK, i need a slitgh change in the guest process:
+I think the API we will call to get shipping rates required the full address detisl (from / to) and consequently,
+we first need to get the address, then call the API (fake at this point) and then get the user to select the 
+shipping option
+
+page sequence: 
+veryfy-claim
+enter-address <-- new 
+select-shipping
+payment-success

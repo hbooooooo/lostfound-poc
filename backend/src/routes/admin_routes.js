@@ -26,7 +26,7 @@ router.get('/organizations', requireAdmin, async (req, res) => {
       FROM organizations o
       LEFT JOIN users u ON u.organization_id = o.id
       LEFT JOIN found_items fi ON fi.organization_id = o.id
-      GROUP BY o.id, o.name
+      GROUP BY o.id, o.name, o.origin_address
       ORDER BY o.name
     `);
     res.json(result.rows);
@@ -41,7 +41,7 @@ router.post('/organizations', requireAdmin, async (req, res) => {
   console.log('[Admin] Create organization request:', req.body);
   console.log('[Admin] User:', req.user);
   
-  const { name } = req.body;
+  const { name, origin_address } = req.body;
   
   if (!name || name.trim().length === 0) {
     console.log('[Admin] Organization name validation failed');
@@ -51,8 +51,8 @@ router.post('/organizations', requireAdmin, async (req, res) => {
   try {
     console.log('[Admin] Attempting to create organization:', name.trim());
     const result = await pool.query(
-      'INSERT INTO organizations (name) VALUES ($1) RETURNING *',
-      [name.trim()]
+      'INSERT INTO organizations (name, origin_address) VALUES ($1, $2) RETURNING *',
+      [name.trim(), origin_address || null]
     );
     
     console.log(`✅ Organization "${name}" created by user ${req.user.username}`);
@@ -69,7 +69,7 @@ router.post('/organizations', requireAdmin, async (req, res) => {
 // Update organization
 router.put('/organizations/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { name } = req.body;
+  const { name, origin_address } = req.body;
   
   if (!name || name.trim().length === 0) {
     return res.status(400).json({ error: 'Organization name is required' });
@@ -77,8 +77,8 @@ router.put('/organizations/:id', requireAdmin, async (req, res) => {
   
   try {
     const result = await pool.query(
-      'UPDATE organizations SET name = $1 WHERE id = $2 RETURNING *',
-      [name.trim(), id]
+      'UPDATE organizations SET name = $1, origin_address = $2 WHERE id = $3 RETURNING *',
+      [name.trim(), origin_address || null, id]
     );
     
     if (result.rows.length === 0) {

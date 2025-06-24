@@ -1,0 +1,17 @@
+Photo from android
+Speed up image analysis
+x Labels dont show up
+x weird layout in activity screen (pics) and need to swap sections
+fallback to cpu (if pb with gpu)
+x logout mobile version
+segregate platform vs hotel admin
+populate dashboard stats & activity
+user profile self management (rest pwd)
+Carrier integration
+
+
+
+
+
+Prod:
+Stripe with prod key

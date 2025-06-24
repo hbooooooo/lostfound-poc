@@ -18,6 +18,7 @@ import paymentRoutes from './routes/payment_routes.js';
 import progressRoutes from './routes/progress_routes.js';
 import confirmRoute from './routes/payment_confirm_route.js';
 import adminRoutes from './routes/admin_routes.js';
+import shippingRoutes from './routes/shipping_routes.js';
 
 const app = express();
 app.use(cors());
@@ -31,6 +32,7 @@ app.use('/api', activityRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api', progressRoutes);
 app.use('/api/payment', confirmRoute);
+app.use('/api', shippingRoutes);
 // Test route to verify API is working
 app.get('/api/test', (req, res) => {
   console.log('Test route hit!');
