@@ -1,0 +1,13 @@
+services:
+  ml_service:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile.cpu
+    ports:
+      - "8001:80"
+    volumes:
+      - ./ml_service:/app
+    # Remove GPU runtime/reservations for CPU-only environments
+    deploy:
+      resources: {}
+

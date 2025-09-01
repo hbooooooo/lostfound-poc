@@ -1,6 +1,8 @@
+numpy<2
 fastapi
 uvicorn
 pillow
+pillow-heif
 pytesseract
 python-multipart
 torch
@@ -8,5 +10,5 @@ transformers<4.40
 ftfy
 scipy
 opencv-python
-paddlepaddle-gpu
-paddleocr
+paddlepaddle==2.5.2
+paddleocr==2.7.3

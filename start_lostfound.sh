@@ -2,9 +2,6 @@
 
 echo "🔁 Starting Lost & Found Stack..."
 
-# Ensure NGINX is up
-echo "📡 Starting NGINX..."
-sudo systemctl start nginx
 
 # Navigate to project directory
 cd ~/lostfound-poc || {

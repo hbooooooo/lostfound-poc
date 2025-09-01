@@ -18,6 +18,7 @@ import PaymentSuccess from './pages/PaymentSuccess.vue'
 import PaymentCancelled from './pages/PaymentCancelled.vue'
 import OrganizationManagement from './pages/OrganizationManagement.vue'
 import UserManagement from './pages/UserManagement.vue'
+import Profile from './pages/Profile.vue'
 
 const routes = [
   { path: '/login', component: Login },
@@ -30,6 +31,7 @@ const routes = [
       { path: 'record', component: Record },
       { path: 'search', component: Search },
       { path: 'activity', component: Activity },
+      { path: 'profile', component: Profile },
       { path: 'admin', name: 'TagAdmin', component: TagAdmin },
       { path: 'admin-panel', component: Admin },
       { path: 'admin/organizations', component: OrganizationManagement },

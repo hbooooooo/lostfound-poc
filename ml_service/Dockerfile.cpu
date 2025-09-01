@@ -1,0 +1,42 @@
+FROM pytorch/pytorch:2.1.0-cpu
+
+WORKDIR /app
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y \
+        wget \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        libxrender-dev \
+        tesseract-ocr \
+        libheif1 \
+        libde265-0 \
+        git \
+        curl \
+        gnupg && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Pre-download models (CLIP + BLIP) to avoid downloading at runtime
+RUN python3 -c "\
+from transformers import CLIPModel, CLIPProcessor, BlipProcessor, BlipForConditionalGeneration; \
+CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
+CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32'); \
+BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-large'); \
+BlipForConditionalGeneration.from_pretrained('Salesforce/blip-image-captioning-large')"
+
+ENV PADDLE_MODEL_PATH=/root/.cache/paddleocr
+
+COPY . .
+
+EXPOSE 80
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+

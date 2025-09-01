@@ -49,7 +49,7 @@ export default {
   methods: {
     async fetchTags() {
       const res = await axios.get('/api/tags/vocabulary');
-      this.tags = res.data || [];
+      this.tags = (res.data || []).slice().sort((a, b) => a.localeCompare(b));
     },
     async fetchFrequentTags() {
       try {
@@ -69,6 +69,7 @@ export default {
           headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
         });
         this.tags.push(tag);
+        this.tags.sort((a, b) => a.localeCompare(b));
         this.newTag = '';
       } catch (err) {
         console.error('[Add Tag Error]', err);

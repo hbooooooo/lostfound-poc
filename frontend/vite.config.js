@@ -16,6 +16,10 @@ export default defineConfig({
       '/uploads': {
         target: 'http://backend:3000',
         changeOrigin: true
+      },
+      '/samples': {
+        target: 'http://backend:3000',
+        changeOrigin: true
       }
     },
     allowedHosts: ['lost.bouard.com']

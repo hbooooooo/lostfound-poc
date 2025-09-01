@@ -56,7 +56,7 @@
           <h3 class="text-lg font-semibold text-gray-900">Recent Activity</h3>
         </div>
         <div class="card-body">
-          <div class="text-center py-8">
+          <div v-if="recent.length === 0" class="text-center py-8">
             <svg class="w-8 h-8 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
             </svg>
@@ -64,6 +64,18 @@
             <router-link to="/activity" class="btn btn-secondary btn-sm">
               View All Activity
             </router-link>
+          </div>
+          <div v-else class="space-y-4">
+            <div v-for="item in recent" :key="item.id" class="flex items-center">
+              <img v-if="item.filename" :src="`/uploads/${item.filename}`" class="w-12 h-12 rounded object-cover mr-3" />
+              <div class="flex-1">
+                <div class="text-sm font-medium text-gray-900 truncate">{{ item.description || 'Untitled item' }}</div>
+                <div class="text-xs text-gray-500">{{ formatDate(item.found_at) }} • {{ item.location || 'Unknown location' }}</div>
+              </div>
+            </div>
+            <div class="pt-2">
+              <router-link to="/activity" class="text-sm text-blue-600 hover:text-blue-800">View Activity Dashboard</router-link>
+            </div>
           </div>
         </div>
       </div>
@@ -76,15 +88,15 @@
           <div class="space-y-4">
             <div class="flex justify-between">
               <span class="text-sm text-gray-600">Total Items</span>
-              <span class="text-sm font-medium">-</span>
+              <span class="text-sm font-medium">{{ stats.total_items ?? '-' }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-sm text-gray-600">Pending Claims</span>
-              <span class="text-sm font-medium">-</span>
+              <span class="text-sm font-medium">{{ stats.pending_claims ?? '-' }}</span>
             </div>
             <div class="flex justify-between">
               <span class="text-sm text-gray-600">Items Returned</span>
-              <span class="text-sm font-medium">-</span>
+              <span class="text-sm font-medium">{{ stats.items_returned ?? '-' }}</span>
             </div>
           </div>
         </div>
@@ -110,10 +122,35 @@
 </template>
 
 <script>
+import axios from 'axios'
+
 export default {
+  data() {
+    return {
+      recent: [],
+      stats: {},
+    }
+  },
   mounted() {
-    // Emit to parent layout
     this.$emit('set-title', 'Welcome');
+    this.loadDashboard();
+  },
+  methods: {
+    formatDate(d) {
+      const date = new Date(d)
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
+    },
+    async loadDashboard() {
+      try {
+        const res = await axios.get('/api/dashboard/summary', {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        })
+        this.recent = res.data.recent_items || []
+        this.stats = res.data.stats || {}
+      } catch (err) {
+        console.error('[Dashboard Load Error]', err)
+      }
+    }
   }
 };
 </script>

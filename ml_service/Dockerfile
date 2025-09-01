@@ -14,6 +14,9 @@ RUN apt-get update && \
         libsm6 \
         libxext6 \
         libxrender-dev \
+        tesseract-ocr \
+        libheif1 \
+        libde265-0 \
         git \
         curl \
         gnupg && \
@@ -31,6 +34,8 @@ CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
 CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32'); \
 BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-large'); \
 BlipForConditionalGeneration.from_pretrained('Salesforce/blip-image-captioning-large')"
+
+ENV PADDLE_MODEL_PATH=/root/.cache/paddleocr
 
 # Make cuDNN and cuBLAS libraries available to Paddle
 ENV LD_LIBRARY_PATH=/opt/conda/lib:/opt/conda/lib/python3.10/site-packages/torch/lib:$LD_LIBRARY_PATH

@@ -19,14 +19,17 @@ function requireAdmin(req, res, next) {
 router.get('/organizations', requireAdmin, async (req, res) => {
   console.log('[Admin] Get organizations request from user:', req.user?.username);
   try {
+    // Ensure optional column exists for older DBs
+    await pool.query("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS origin_address JSONB");
+
     const result = await pool.query(`
-      SELECT o.*, 
-             COUNT(u.id) as user_count,
-             COUNT(fi.id) as item_count
+      SELECT 
+        o.id,
+        o.name,
+        o.origin_address,
+        (SELECT COUNT(*) FROM users u WHERE u.organization_id = o.id) AS user_count,
+        (SELECT COUNT(*) FROM found_items fi WHERE fi.organization_id = o.id) AS item_count
       FROM organizations o
-      LEFT JOIN users u ON u.organization_id = o.id
-      LEFT JOIN found_items fi ON fi.organization_id = o.id
-      GROUP BY o.id, o.name, o.origin_address
       ORDER BY o.name
     `);
     res.json(result.rows);
@@ -49,6 +52,8 @@ router.post('/organizations', requireAdmin, async (req, res) => {
   }
   
   try {
+    // Ensure optional column exists for older DBs
+    await pool.query("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS origin_address JSONB");
     console.log('[Admin] Attempting to create organization:', name.trim());
     const result = await pool.query(
       'INSERT INTO organizations (name, origin_address) VALUES ($1, $2) RETURNING *',
@@ -76,6 +81,8 @@ router.put('/organizations/:id', requireAdmin, async (req, res) => {
   }
   
   try {
+    // Ensure optional column exists for older DBs
+    await pool.query("ALTER TABLE organizations ADD COLUMN IF NOT EXISTS origin_address JSONB");
     const result = await pool.query(
       'UPDATE organizations SET name = $1, origin_address = $2 WHERE id = $3 RETURNING *',
       [name.trim(), origin_address || null, id]

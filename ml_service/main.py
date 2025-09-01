@@ -2,8 +2,25 @@ import os
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 from PIL import Image
-from paddleocr import PaddleOCR  # Add this import at the beginning of the file
-from paddle_ocr import paddle_ocr
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    print("[HEIC] pillow-heif registered")
+except Exception as _heif_err:
+    print("[HEIC] pillow-heif not available:", _heif_err)
+"""OCR and vision pipeline
+- PaddleOCR: enabled (lazy init), falls back to Tesseract if unavailable
+- CLIP: tags + 512-d embedding
+- BLIP: caption (used to derive concise description)
+"""
+
+# Try to enable PaddleOCR, but keep service working if unavailable
+try:
+    from paddleocr import PaddleOCR  # heavy import
+    _PADDLE_AVAILABLE = True
+except Exception as e:
+    print("[PaddleOCR Disabled]", e)
+    _PADDLE_AVAILABLE = False
 import pytesseract
 import io
 import requests
@@ -14,6 +31,7 @@ from transformers import (
 )
 import cv2
 import numpy as np
+import threading
 
 # Point d'accès FastAPI
 app = FastAPI()
@@ -21,6 +39,7 @@ app = FastAPI()
 # 🔁 Load models from local cache (set via environment)
 HF_CACHE = os.getenv("TRANSFORMERS_CACHE", "/root/.cache/huggingface")
 PADDLE_CACHE = os.getenv("PADDLE_MODEL_PATH", "/root/.cache/paddleocr")
+ENABLE_TESSERACT_FALLBACK = os.getenv("ENABLE_TESSERACT_FALLBACK", "0") == "1"
 
 print("Loading CLIP model...")
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32", cache_dir=HF_CACHE)
@@ -37,11 +56,50 @@ clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32", c
 blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
 blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large", cache_dir=HF_CACHE)
 
-ocr_model = PaddleOCR(use_angle_cls=True, lang='en', det_db_box_thresh=0.3, use_gpu=True, 
-                      det_model_dir=os.path.join(PADDLE_CACHE, "en_PP-OCRv3_det_infer"),
-                      rec_model_dir=os.path.join(PADDLE_CACHE, "en_PP-OCRv3_rec_infer"),
-                      cls_model_dir=os.path.join(PADDLE_CACHE, "ch_ppocr_mobile_v2.0_cls_infer"))
+_paddle_ocr_model = None
 
+def run_paddle_ocr(image: Image.Image) -> str:
+    """Use PaddleOCR if available; return empty string on failure."""
+    global _paddle_ocr_model
+    if not _PADDLE_AVAILABLE:
+        return ""
+    try:
+        if _paddle_ocr_model is None:
+            # Use stable 2.x API on CPU to avoid GPU/paddlex issues
+            _paddle_ocr_model = PaddleOCR(use_angle_cls=True, lang='en', use_gpu=False, show_log=False)
+        import numpy as np
+        img_array = np.array(image.convert("RGB"))
+        result = _paddle_ocr_model.ocr(img_array, cls=True)
+        if not result or not result[0]:
+            return ""
+        lines = []
+        for line in result[0]:
+            box, (text, conf) = line
+            if len(text.strip()) >= 3 and conf >= 0.4:
+                lines.append(text)
+        return " ".join(lines)
+    except Exception as e:
+        print("[PaddleOCR Error]", e)
+        return ""
+
+
+def run_paddle_ocr_with_timeout(image: Image.Image, seconds: float = 10.0):
+    result = {"text": "", "timeout": False, "error": None}
+
+    def _worker():
+        try:
+            txt = run_paddle_ocr(image)
+            result["text"] = txt or ""
+        except Exception as e:
+            result["error"] = str(e)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=seconds)
+    if t.is_alive():
+        result["timeout"] = True
+        return "", {"timeout": True}
+    return result["text"], {"timeout": False, "error": result["error"]}
 
 def preprocess_image_for_ocr(image):
     """
@@ -239,10 +297,10 @@ def perform_intelligent_ocr(image):
             results.sort(key=lambda x: (x[1], len(x[0].strip())), reverse=True)
             best_text, best_confidence, best_method = results[0]
         
-        # Improved quality filter
-        if best_confidence < 40 or len(best_text.strip()) < 2:
+        # Improved quality filter (slightly more permissive)
+        if best_confidence < 30 or len(best_text.strip()) < 2:
             best_text = ""
-        elif text_probability < 0.2 and best_confidence < 60:
+        elif text_probability < 0.2 and best_confidence < 50:
             best_text = ""
         
         ocr_info = {
@@ -295,17 +353,11 @@ def extract_item_description(full_caption, tags=None):
     # Remove articles at the beginning if they remain
     cleaned = re.sub(r'^(a |an |the )', '', cleaned.strip())
     
-    # If we have tags, try to make description more consistent with detected tags
+    # If description starts with the chosen tag, remove it (no longer needed)
     if tags and len(tags) > 0:
-        main_tag = tags[0].lower()
-        # If the main tag is not in the description, try to incorporate it
-        if main_tag not in cleaned and len(cleaned.split()) > 3:
-            # If description is complex and doesn't contain main tag, prefer the tag
-            if any(word in cleaned for word in ['with', 'and', 'that']):
-                # Keep descriptive parts but ensure main item type is prominent
-                words = cleaned.split()
-                if main_tag not in ' '.join(words[:2]):
-                    cleaned = f"{main_tag} {cleaned}"
+        main_tag = str(tags[0]).lower()
+        if cleaned.startswith(main_tag + ' '):
+            cleaned = cleaned[len(main_tag) + 1:]
     
     # Clean up extra spaces and return
     cleaned = re.sub(r'\s+', ' ', cleaned.strip())
@@ -360,10 +412,12 @@ async def perform_ocr(file: UploadFile = File(...)):
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
 
-        # Intelligent OCR step using smart OCR pipeline
-        text = paddle_ocr(image)
-        ocr_confidence = 0.8
-        ocr_info = {"method": "smart_pipeline"}
+        # OCR step: prefer PaddleOCR; optionally fall back to Tesseract
+        text, paddle_meta = run_paddle_ocr_with_timeout(image, seconds=10.0)
+        ocr_info = {"method": "paddleocr", **paddle_meta}
+        if not text and ENABLE_TESSERACT_FALLBACK:
+            text, ocr_confidence, extra = perform_intelligent_ocr(image)
+            ocr_info.update(extra)
 
         # ⏬ Get up-to-date tag labels from DB
         candidate_labels = fetch_tag_vocabulary()
@@ -372,38 +426,135 @@ async def perform_ocr(file: UploadFile = File(...)):
         if not candidate_labels:
             candidate_labels = ["item", "object", "thing"]
 
-        # CLIP tag processing
-        inputs = clip_processor(text=candidate_labels, images=image, return_tensors="pt", padding=True)
-        outputs = clip_model(**inputs)
+        # Ensure candidate_labels is a flat list of strings and normalize
+        if isinstance(candidate_labels, list) and len(candidate_labels) > 0:
+            flat_labels = []
+            for label in candidate_labels:
+                if isinstance(label, dict) and 'name' in label:
+                    flat_labels.append(label['name'])
+                elif isinstance(label, str):
+                    flat_labels.append(label)
+                else:
+                    flat_labels.append(str(label))
+            # Normalize basic plural forms and casing
+            def _normalize(lbl: str) -> str:
+                s = lbl.strip().lower()
+                if s.endswith('ies') and len(s) > 3:
+                    return s[:-3] + 'y'
+                if s.endswith('es') and len(s) > 2:
+                    return s[:-2]
+                if s.endswith('s') and len(s) > 1:
+                    return s[:-1]
+                return s
+            candidate_labels = [_normalize(x) for x in flat_labels]
 
-        # Get predictions
-        logits_per_image = outputs.logits_per_image  # shape: [1, N_labels]
-        probs = logits_per_image.softmax(dim=1)
+        # Generate caption (BLIP), tags (CLIP zero-shot), and embedding (CLIP)
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"[Vision] start device={device}")
+            # Move models to target device (no-op if already there)
+            _ = clip_model.to(device)
+            _ = blip_model.to(device)
+            print("[Vision] models ready")
 
-        # ✅ Filter by confidence
-        threshold = 0.25  # or 0.30 to be stricter
-        top_probs, top_indices = torch.topk(probs, k=5)
-        tags = []
-        tag_scores = []
+            # BLIP captioning
+            blip_inputs = blip_processor(images=image, return_tensors="pt").to(device)
+            with torch.no_grad():
+                blip_output = blip_model.generate(**blip_inputs, max_new_tokens=30)
+            full_caption = blip_processor.tokenizer.decode(blip_output[0], skip_special_tokens=True).strip()
 
-        for i, score in enumerate(top_probs[0]):
-            if score >= threshold:
-                idx = top_indices[0][i].item()
-                tags.append(candidate_labels[idx])
-                tag_scores.append(float(score))
+            # CLIP image features
+            try:
+                clip_image_inputs = clip_processor(images=image, return_tensors="pt").to(device)
+                with torch.no_grad():
+                    image_features = clip_model.get_image_features(**clip_image_inputs)
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            except Exception as e_img:
+                print("[CLIP Image Features Error]", e_img)
+                raise
 
-        # Caption generation (free-form)
-        # BLIP captioning
-        blip_inputs = blip_processor(images=image, return_tensors="pt")
-        blip_output = blip_model.generate(**blip_inputs, max_length=50)
-        full_caption = blip_processor.decode(blip_output[0], skip_special_tokens=True)
-        
-        # Extract concise item description
-        concise_description = extract_item_description(full_caption, tags)
-        caption_confidence = 1.0  # dummy placeholder
+            # Zero-shot tagging with prompt ensembling per label
+            try:
+                templates = [
+                    'a photo of a {label}',
+                    'a photo of the {label}',
+                    'a close-up of a {label}',
+                    'a picture of a {label}',
+                    'the {label}',
+                    '{label}'
+                ]
+                feats_per_label = []
+                for lbl in candidate_labels:
+                    per_prompts = [t.format(label=lbl) for t in templates]
+                    # Encode each prompt and average their normalized features
+                    per_feats = []
+                    for prompt in per_prompts:
+                        tok = clip_processor.tokenizer([prompt], padding=True, truncation=True, return_tensors="pt").to(device)
+                        with torch.no_grad():
+                            tf = clip_model.get_text_features(**tok)
+                        tf = tf / tf.norm(dim=-1, keepdim=True)
+                        per_feats.append(tf)
+                    mean_feat = torch.mean(torch.cat(per_feats, dim=0), dim=0, keepdim=True)
+                    mean_feat = mean_feat / mean_feat.norm(dim=-1, keepdim=True)
+                    feats_per_label.append(mean_feat)
+                text_features = torch.cat(feats_per_label, dim=0)  # [num_labels, dim]
+            except Exception as e_txt:
+                print("[CLIP Text Features Error]", e_txt)
+                raise
 
-        # Embedding vector
-        image_embedding = outputs.image_embeds[0].tolist()
+            # Similarity and probabilities with caption/OCR boosting
+            try:
+                logits_per_image = image_features @ text_features.T
+                probs = torch.softmax(logits_per_image, dim=-1).squeeze(0)
+            except Exception as e_sim:
+                print("[CLIP Similarity Error]", e_sim)
+                raise
+
+            # Boost labels mentioned in BLIP caption, concise description, or OCR text
+            try:
+                caption_l = (full_caption or '').lower()
+                desc_l = (concise_description or '').lower()
+                ocr_l = (text or '').lower()
+                weights = []
+                for lbl in candidate_labels:
+                    w = 1.0
+                    if lbl in caption_l:
+                        w += 0.35
+                    if lbl in desc_l:
+                        w += 0.25
+                    if lbl in ocr_l or (lbl + 's') in ocr_l:
+                        w += 0.20
+                    weights.append(w)
+                w_t = torch.tensor(weights, device=probs.device, dtype=probs.dtype)
+                adj = probs * w_t
+                adj = adj / (adj.sum() + 1e-9)
+            except Exception as _e_boost:
+                adj = probs
+
+            # Pick only the single best tag (most probable after boosting)
+            try:
+                top_idx = int(torch.argmax(adj).item())
+                tags = [candidate_labels[top_idx]]
+                tag_scores = [float(adj[top_idx].item())]
+            except Exception:
+                tags = [candidate_labels[0]] if candidate_labels else ["item"]
+                tag_scores = [1.0]
+
+            # Description: concise form of BLIP caption using tags for context
+            concise_description = extract_item_description(full_caption, tags)
+            caption_confidence = 1.0
+
+            # 512-dim embedding vector from CLIP (ViT-B/32)
+            image_embedding = image_features.squeeze(0).detach().cpu().tolist()
+        except Exception as e:
+            print(f"[Vision Pipeline Fallback] {e}")
+            # Fallbacks if models or inference fail
+            tags = ["item"]
+            tag_scores = [0.5]
+            full_caption = "image"
+            concise_description = "item"
+            caption_confidence = 1.0
+            image_embedding = [0.0] * 512
 
         return JSONResponse(content={
             "description": concise_description,
@@ -415,13 +566,13 @@ async def perform_ocr(file: UploadFile = File(...)):
             "ocr_info": ocr_info,  # Include OCR diagnostic information
             "full_caption": full_caption  # Keep original for debugging if needed
         })
-    
+
     except Exception as e:
         print(f"Error in OCR processing: {e}")
         return JSONResponse(
             status_code=500,
             content={
-                "error": "OCR processing failed", 
+                "error": "OCR processing failed",
                 "details": str(e),
                 "text": "",
                 "tags": [],
@@ -430,3 +581,13 @@ async def perform_ocr(file: UploadFile = File(...)):
                 "ocr_info": {"error": str(e)}
             }
         )
+
+# Warmup PaddleOCR at startup to pre-download models and avoid first-request latency
+@app.on_event("startup")
+def warmup_models():
+    try:
+        if _PADDLE_AVAILABLE:
+            img = Image.new('RGB', (64, 64), color='white')
+            threading.Thread(target=lambda: run_paddle_ocr_with_timeout(img, seconds=20.0), daemon=True).start()
+    except Exception as e:
+        print("[Warmup Error]", e)

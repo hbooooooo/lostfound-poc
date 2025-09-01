@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
+import jwt from 'jsonwebtoken';
 import pkg from 'pg';
 
 const { Pool } = pkg;
@@ -14,14 +15,26 @@ const pool = new Pool({
 
 const router = express.Router();
 
+// Minimal JWT auth (duplicate of main middleware to keep this router self-contained)
+function authenticateToken(req, res, next) {
+  const auth = req.headers.authorization;
+  const token = auth && auth.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  jwt.verify(token, process.env.JWT_SECRET || 'changeme', (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid token' });
+    req.user = user;
+    next();
+  });
+}
+
 // GET /api/items/:id
-router.get('/items/:id', async (req, res) => {
+router.get('/items/:id', authenticateToken, async (req, res) => {
   const itemId = req.params.id;
 
   try {
     const result = await pool.query(
-      `SELECT * FROM found_items WHERE id = $1`,
-      [itemId]
+      `SELECT * FROM found_items WHERE id = $1 AND organization_id = $2`,
+      [itemId, req.user.organization_id]
     );
 
     if (result.rows.length === 0) {

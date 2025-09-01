@@ -61,6 +61,9 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Until de do better with real labels
 app.use('/labels', express.static(path.join(__dirname, '../labels')));
 
+// Demo/sample images for marketing/UX (login hero, etc.)
+app.use('/samples', express.static(path.join(__dirname, '../sample_images')));
+
 // 🔐 JWT middleware
 function authenticateToken(req, res, next) {
   const auth = req.headers.authorization;
@@ -73,6 +76,9 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
+
+// 🔧 External services
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://ml_service';
 
 // 🧾 Signup
 app.post('/api/signup', async (req, res) => {
@@ -140,7 +146,7 @@ app.post('/api/ocr', upload.single('file'), async (req, res) => {
     const formData = new FormData();
     formData.append('file', fs.createReadStream(filePath));
 
-    const response = await axios.post('http://ml_service/ocr', formData, {
+    const response = await axios.post(`${ML_SERVICE_URL}/ocr`, formData, {
       headers: formData.getHeaders(),
       timeout: 120000  // 2 minute timeout for OCR processing
     });
@@ -150,8 +156,101 @@ app.post('/api/ocr', upload.single('file'), async (req, res) => {
       filename: req.file.filename
     });
   } catch (err) {
-    console.error('[OCR Error]', err);
-    res.status(500).json({ error: 'OCR failed' });
+    const info = {
+      message: err.message,
+      code: err.code,
+      response_status: err.response?.status,
+      response_body: err.response?.data,
+    };
+    console.error('[OCR Error]', info);
+    res.status(502).json({ error: 'ML service unavailable', details: info });
+  }
+});
+
+// Health check to verify ml_service availability from backend
+app.get('/api/ml/health', async (_req, res) => {
+  try {
+    const r = await axios.get(`${ML_SERVICE_URL}/health`, { timeout: 5000 });
+    res.json({ ok: true, url: ML_SERVICE_URL, data: r.data });
+  } catch (e) {
+    res.status(503).json({ ok: false, url: ML_SERVICE_URL, error: e.message });
+  }
+});
+
+// 👤 Self profile endpoints
+async function ensureUserProfileColumns() {
+  try {
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT");
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_filename TEXT");
+  } catch (e) {
+    console.warn('Profile columns ensure failed:', e.message);
+  }
+}
+
+app.get('/api/me', authenticateToken, async (req, res) => {
+  try {
+    await ensureUserProfileColumns();
+    const r = await pool.query(
+      'SELECT id, username, organization_id, display_name, avatar_filename FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'User not found' });
+    const u = r.rows[0];
+    const avatar_url = u.avatar_filename ? `/uploads/${u.avatar_filename}` : null;
+    res.json({ ...u, avatar_url });
+  } catch (e) {
+    console.error('[Get Me Error]', e);
+    res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+app.put('/api/me', authenticateToken, async (req, res) => {
+  const { display_name } = req.body;
+  try {
+    await ensureUserProfileColumns();
+    const r = await pool.query(
+      'UPDATE users SET display_name = $1 WHERE id = $2 RETURNING id, username, organization_id, display_name, avatar_filename',
+      [display_name || null, req.user.id]
+    );
+    const u = r.rows[0];
+    const avatar_url = u.avatar_filename ? `/uploads/${u.avatar_filename}` : null;
+    res.json({ ...u, avatar_url });
+  } catch (e) {
+    console.error('[Update Me Error]', e);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+app.put('/api/me/password', authenticateToken, async (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!new_password || new_password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters' });
+  }
+  try {
+    // Verify current password
+    const r = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+    if (r.rowCount === 0) return res.status(404).json({ error: 'User not found' });
+    const ok = await bcrypt.compare(current_password || '', r.rows[0].password);
+    if (!ok) return res.status(403).json({ error: 'Current password is incorrect' });
+
+    const hashed = await bcrypt.hash(new_password, 10);
+    await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashed, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Password Update Error]', e);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+app.post('/api/me/avatar', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    await ensureUserProfileColumns();
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    await pool.query('UPDATE users SET avatar_filename = $1 WHERE id = $2', [req.file.filename, req.user.id]);
+    res.json({ avatar_url: `/uploads/${req.file.filename}` });
+  } catch (e) {
+    console.error('[Avatar Upload Error]', e);
+    res.status(500).json({ error: 'Failed to upload avatar' });
   }
 });
 
@@ -171,6 +270,9 @@ app.post('/api/items', authenticateToken, async (req, res) => {
   if (!embedding || !Array.isArray(embedding)) {
     return res.status(400).json({ error: 'Missing or invalid embedding array' });
   }
+  if (embedding.length !== 512) {
+    return res.status(400).json({ error: `Embedding must be 512 dimensions, got ${embedding.length}` });
+  }
 
   try {
     await pool.query(
@@ -178,7 +280,7 @@ app.post('/api/items', authenticateToken, async (req, res) => {
         ocr_text, tags, embedding, location, found_at,
         filename, description, description_score, organization_id, submitted_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      VALUES ($1, $2, $3::vector, $4, $5, $6, $7, $8, $9, $10)`,
       [
         text,
         tags,
@@ -318,11 +420,20 @@ app.delete('/api/tags/vocabulary', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/claims/mark-shipped', async (req, res) => {
+app.post('/api/claims/mark-shipped', authenticateToken, async (req, res) => {
   const { item_id } = req.body;
   if (!item_id) return res.status(400).json({ error: 'Missing item_id' });
   // Assigned a MOCK LABEL for now
   try {
+    // Ensure the item belongs to the caller's organization
+    const owner = await pool.query('SELECT organization_id FROM found_items WHERE id = $1', [item_id]);
+    if (owner.rowCount === 0) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+    if (owner.rows[0].organization_id !== req.user.organization_id) {
+      return res.status(403).json({ error: 'Forbidden for this organization' });
+    }
+
     const result = await pool.query(
       `UPDATE claims
        SET shipped = true, shipping_label = 'mock-label.pdf'
@@ -342,8 +453,78 @@ app.post('/api/claims/mark-shipped', async (req, res) => {
   }
 });
 
+// 📊 Dashboard summary (per-organization)
+app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
+  try {
+    const orgId = req.user.organization_id;
+
+    const totalItemsQ = pool.query(
+      'SELECT COUNT(*)::int AS count FROM found_items WHERE organization_id = $1',
+      [orgId]
+    );
+
+    const pendingClaimsQ = pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM claims c
+       JOIN found_items fi ON fi.id = c.item_id
+       WHERE fi.organization_id = $1
+         AND (c.shipped IS DISTINCT FROM TRUE)`,
+      [orgId]
+    );
+
+    const returnedItemsQ = pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM claims c
+       JOIN found_items fi ON fi.id = c.item_id
+       WHERE fi.organization_id = $1
+         AND c.delivered = TRUE`,
+      [orgId]
+    );
+
+    const recentItemsQ = pool.query(
+      `SELECT id, description, filename, found_at, location
+       FROM found_items
+       WHERE organization_id = $1
+       ORDER BY found_at DESC, id DESC
+       LIMIT 3`,
+      [orgId]
+    );
+
+    const [totalItems, pendingClaims, returnedItems, recentItems] = await Promise.all([
+      totalItemsQ, pendingClaimsQ, returnedItemsQ, recentItemsQ
+    ]);
+
+    res.json({
+      stats: {
+        total_items: totalItems.rows[0].count,
+        pending_claims: pendingClaims.rows[0].count,
+        items_returned: returnedItems.rows[0].count,
+      },
+      recent_items: recentItems.rows,
+    });
+  } catch (err) {
+    console.error('[Dashboard Summary Error]', err);
+    res.status(500).json({ error: 'Failed to load dashboard summary' });
+  }
+});
+
 // 🚀 Start server (moved to end after all routes are defined)
 app.listen(3000, () => {
   console.log('✅ Backend running on port 3000');
   console.log('All routes have been registered');
 });
+
+// On startup, ensure TestOrg exists and backfill null organization_ids
+(async function ensureOrgBackfill() {
+  try {
+    const orgName = process.env.DEFAULT_ORG_NAME || 'TestOrg';
+    const orgRes = await pool.query('INSERT INTO organizations(name) VALUES($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id', [orgName]);
+    const orgId = orgRes.rows[0].id;
+    const upd = await pool.query('UPDATE found_items SET organization_id = $1 WHERE organization_id IS NULL', [orgId]);
+    if (upd.rowCount > 0) {
+      console.log(`🔧 Backfilled ${upd.rowCount} items to organization ${orgName} (id=${orgId})`);
+    }
+  } catch (e) {
+    console.warn('Org backfill skipped:', e.message);
+  }
+})();

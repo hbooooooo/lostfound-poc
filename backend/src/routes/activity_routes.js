@@ -1,4 +1,5 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import pkg from 'pg';
 
 const { Pool } = pkg;
@@ -12,16 +13,30 @@ const pool = new Pool({
 
 const router = express.Router();
 
+function authenticateToken(req, res, next) {
+  const auth = req.headers.authorization;
+  const token = auth && auth.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Missing token' });
+  jwt.verify(token, process.env.JWT_SECRET || 'changeme', (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid token' });
+    req.user = user;
+    next();
+  });
+}
+
 // GET /api/claims/activity
-router.get('/claims/activity', async (req, res) => {
+router.get('/claims/activity', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT claims.id, claims.email, claims.verified, claims.created_at,
-              found_items.description, found_items.filename, found_items.found_at
-       FROM claims
-       JOIN found_items ON claims.item_id = found_items.id
-       WHERE claims.verified = TRUE AND (claims.shipped IS NULL OR claims.shipped = FALSE)
-       ORDER BY claims.created_at DESC`
+      `SELECT c.id, c.email, c.verified, c.created_at,
+              fi.description, fi.filename, fi.found_at
+       FROM claims c
+       JOIN found_items fi ON c.item_id = fi.id
+       WHERE c.verified = TRUE 
+         AND (c.shipped IS NULL OR c.shipped = FALSE)
+         AND fi.organization_id = $1
+       ORDER BY c.created_at DESC`,
+      [req.user.organization_id]
     );
     res.json(result.rows);
   } catch (err) {

@@ -17,9 +17,12 @@
       
       <!-- User Avatar & Logout -->
       <div class="flex items-center space-x-3">
-        <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
-          <span class="text-white font-medium text-sm">U</span>
-        </div>
+        <button @click="$router.push('/profile')" class="w-8 h-8 rounded-full flex items-center justify-center focus:ring-2 focus:ring-blue-300 overflow-hidden">
+          <img v-if="user && user.avatar_url" :src="user.avatar_url" class="w-full h-full object-cover" />
+          <div v-else class="w-full h-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+            <span class="text-white font-medium text-sm">{{ userInitial }}</span>
+          </div>
+        </button>
         <button
           @click="logout"
           class="btn btn-ghost text-sm text-gray-600 hover:text-red-600"
@@ -40,6 +43,25 @@ export default {
     title: {
       type: String,
       default: ''
+    },
+    user: {
+      type: Object,
+      default: null
+    }
+  },
+  computed: {
+    userInitial() {
+      try {
+        if (this.user && (this.user.display_name || this.user.username)) {
+          const name = this.user.display_name || this.user.username
+          return (name.charAt(0) || 'U').toUpperCase()
+        }
+        const tok = localStorage.getItem('token')
+        if (!tok) return 'U'
+        const payload = JSON.parse(atob(tok.split('.')[1] || ''))
+        const name = payload.username || 'U'
+        return (name.charAt(0) || 'U').toUpperCase()
+      } catch { return 'U' }
     }
   },
   methods: {
