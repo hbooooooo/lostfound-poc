@@ -68,9 +68,9 @@
           <div v-else class="space-y-4">
             <div v-for="item in recent" :key="item.id" class="flex items-center">
               <img v-if="item.filename" :src="`/uploads/${item.filename}`" class="w-12 h-12 rounded object-cover mr-3" />
-              <div class="flex-1">
+              <div class="flex-1 min-w-0">
                 <div class="text-sm font-medium text-gray-900 truncate">{{ item.description || 'Untitled item' }}</div>
-                <div class="text-xs text-gray-500">{{ formatDate(item.found_at) }} • {{ item.location || 'Unknown location' }}</div>
+                <div class="text-xs text-gray-500 truncate">{{ formatDate(item.found_at) }} • {{ item.location || 'Unknown location' }}</div>
               </div>
             </div>
             <div class="pt-2">

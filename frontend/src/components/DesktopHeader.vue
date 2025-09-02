@@ -8,11 +8,11 @@
     <!-- Right: User Menu -->
     <div class="flex items-center space-x-4">
       <!-- Notifications -->
-      <button class="btn-ghost p-2 rounded-lg relative">
+      <button class="btn-ghost p-2 rounded-lg relative" :class="notifyCount > 0 ? 'text-gray-700' : 'text-gray-400'" @click="$router.push('/activity')" aria-label="Notifications">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-4.5-4.5A8.002 8.002 0 0120 8a8 8 0 10-16 0c0 2.172.86 4.14 2.26 5.74L2 17h5m8 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
-        <span class="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-400 ring-2 ring-white"></span>
+        <span v-if="notifyCount > 0" class="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>
       </button>
       
       <!-- User Avatar & Logout -->
@@ -47,6 +47,10 @@ export default {
     user: {
       type: Object,
       default: null
+    },
+    notifyCount: {
+      type: Number,
+      default: 0
     }
   },
   computed: {

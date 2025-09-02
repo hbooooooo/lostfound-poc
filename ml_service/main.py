@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, File, UploadFile
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from PIL import Image
 try:
@@ -401,6 +402,35 @@ def health_check():
         return {"status": "ready", "models_loaded": True}
     else:
         return {"status": "loading", "models_loaded": False}
+
+
+class TextPayload(BaseModel):
+    text: str
+
+@app.post("/embed_text")
+def embed_text(payload: TextPayload):
+    """Return a 512-d CLIP text embedding for the provided text.
+    Normalizes the vector to unit length to match how image features are stored/compared.
+    """
+    try:
+        txt = (payload.text or "").strip()
+        if not txt:
+            return JSONResponse(status_code=400, content={"error": "text is required"})
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        _ = clip_model.to(device)
+
+        tok = clip_processor.tokenizer([txt], padding=True, truncation=True, return_tensors="pt").to(device)
+        with torch.no_grad():
+            tf = clip_model.get_text_features(**tok)
+        tf = tf / tf.norm(dim=-1, keepdim=True)
+        emb = tf.squeeze(0).detach().cpu().tolist()
+        # Ensure correct size
+        if not isinstance(emb, list) or len(emb) != 512:
+            return JSONResponse(status_code=500, content={"error": "invalid embedding size", "size": len(emb) if isinstance(emb, list) else None})
+        return {"embedding": emb}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": "embedding failed", "details": str(e)})
 
 @app.get("/tags")
 def get_tags():

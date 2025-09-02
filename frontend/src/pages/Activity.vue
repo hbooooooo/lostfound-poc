@@ -52,6 +52,7 @@
               <div class="space-y-1 text-sm text-gray-600 mb-3">
                 <p><span class="font-medium">Location:</span> {{ item.location }}</p>
                 <p><span class="font-medium">Found:</span> {{ formatDate(item.found_at) }}</p>
+                <p v-if="item.verified && item.owner_name"><span class="font-medium">Owner:</span> {{ item.owner_name }}</p>
               </div>
               <div class="space-x-2">
                 <!-- Download Label: Only show when preparing shipment and not yet shipped -->
@@ -158,10 +159,13 @@ export default {
 
     async function markShipped(itemId) {
       try {
-        await axios.post(`/api/claims/mark-shipped`, { item_id: itemId })
+        await axios.post(`/api/claims/mark-shipped`, { item_id: itemId }, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        })
         await loadItems()
       } catch (err) {
         console.error('Failed to mark as shipped:', err)
+        alert('Failed to mark as ready. Please ensure you are logged in.')
       }
     }
 

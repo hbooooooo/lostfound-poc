@@ -47,6 +47,9 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
   - `POST /api/items` (auth) → saves item (embeddings cast to `vector`, requires 512 dims).
   - `POST /api/search` (auth) → filters by `req.user.organization_id`, optional keyword/date, optional embedding similarity.
   - `GET /api/items/:id` (auth) → restricted to caller’s org.
+- Dashboard & Notifications:
+  - `GET /api/dashboard/summary` (auth) → org‑scoped stats + last 3 items.
+  - `GET /api/notifications/summary` (auth) → `{ ready_to_ship }` count for bell indicator.
 - Tags:
   - `GET /api/tags/vocabulary`
   - `GET /api/tags/frequent` (auth, scoped by org)
@@ -56,6 +59,11 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
   - `POST /api/claims/initiate` (auth) → restricted to caller’s org for the item.
   - `GET /api/claims/activity` (auth) → restricted to caller’s org.
   - `POST /api/claims/mark-shipped` (auth) → restricted to caller’s org.
+- Profile:
+  - `GET /api/me` (auth) → id, username, organization_id, display_name, avatar.
+  - `PUT /api/me` (auth) → update `display_name`.
+  - `PUT /api/me/password` (auth) → requires `current_password`, sets `new_password`.
+  - `POST /api/me/avatar` (auth, multipart) → upload avatar file.
 - Admin (all under `/api/admin`, auth required; simple requireAdmin placeholder):
   - `GET /api/admin/organizations` → ensures `origin_address` column, returns counts via subqueries (correct counts).
   - `POST /api/admin/organizations`, `PUT /api/admin/organizations/:id`, `DELETE /api/admin/organizations/:id` (ensures `origin_address`).
@@ -65,9 +73,12 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
 - `Record.vue` (Upload & Process):
   - HEIC handled client‑side via `heic2any` (JPEG conversion, size limits). Calls `/api/ocr`. Shows description/OCR/tags. Saves via `/api/items` (auth).
 - `Activity.vue`: Uses `/api/search` to display items in two groups; marks shipped via `/api/claims/mark-shipped` (now auth + org check).
+- Headers (Desktop/Mobile): Show avatar if present, otherwise initial; bell shows red dot only when there are items ready to ship (uses `/api/notifications/summary`).
 - `ClaimForm.vue`: Loads item via `/api/items/:id` (now auth + org check), sends claim initiation.
 - `OrganizationManagement.vue`: Uses admin org endpoints. Fixed DB mismatch on `origin_address` and corrected counts.
 - `TagAdmin.vue`: Tag list sorted A→Z; frequent tags loaded per org.
+- `Profile.vue`: Self‑service profile (display name, password with current‑password check, avatar upload with client‑side crop/resize).
+- `Login.vue`: Polished hero with sample image + gradient; fake “Forgot password?” modal.
 
 ## ML Service Notes (`ml_service/`)
 - OCR: PaddleOCR primary (kept as requested). Optional Tesseract fallback is off by default (`ENABLE_TESSERACT_FALLBACK=0`).
@@ -88,6 +99,11 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
   - Startup backfill: assign null `found_items.organization_id` to `TestOrg`.
 - Tag Admin UI sorted alphabetically.
 - Description no longer starts with the chosen tag (cleaner phrasing).
+- Dashboard summary endpoint + portal wiring (recent 3 items + org‑scoped stats).
+- Notifications summary endpoint; bell red dot only when items are ready to ship.
+- Profile endpoints (`/api/me*`) and UI (avatar/name/password with current password).
+- Login page redesign with hero + fake reset modal; static samples served via `/samples` (Docker volume mounted).
+- Nginx upstream resolution stabilized with Docker DNS resolver; ML health + URL config.
 
 ## Known/Next
 - Tagging tweaks: consider synonyms (e.g., umbrella/brolly/parasol), per‑org priors, or uncertainty threshold for very low scores.

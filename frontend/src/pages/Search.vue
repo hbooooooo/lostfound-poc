@@ -19,6 +19,20 @@
                 placeholder="Keywords, tags, location..." 
                 class="form-input" 
               />
+              <label class="mt-2 inline-flex items-center space-x-2">
+                <input type="checkbox" v-model="useSemantic" class="form-checkbox" />
+                <span class="text-sm text-gray-600">Use closest match instead of exact</span>
+                <svg
+                  class="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                  :title="'Find by meaning, not exact words. Ranks closest matches; helpful for synonyms (e.g., “rucksack” ≈ “backpack”).'"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 18a6 6 0 100-12 6 6 0 000 12z"></path>
+                </svg>
+              </label>
             </div>
             <div>
               <label class="form-label">Start Date</label>
@@ -51,22 +65,14 @@
         <h3 class="text-lg font-semibold text-gray-900">Filter by Status</h3>
       </div>
       <div class="card-body">
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           <label class="flex items-center space-x-2 cursor-pointer">
             <input type="checkbox" v-model="filterStatus.initiated" class="form-checkbox" />
             <span class="text-sm text-gray-700">Email Sent</span>
           </label>
           <label class="flex items-center space-x-2 cursor-pointer">
-            <input type="checkbox" v-model="filterStatus.verified" class="form-checkbox" />
-            <span class="text-sm text-gray-700">Owner Identified</span>
-          </label>
-          <label class="flex items-center space-x-2 cursor-pointer">
-            <input type="checkbox" v-model="filterStatus.shipping" class="form-checkbox" />
-            <span class="text-sm text-gray-700">T&Cs Approved</span>
-          </label>
-          <label class="flex items-center space-x-2 cursor-pointer">
-            <input type="checkbox" v-model="filterStatus.paid" class="form-checkbox" />
-            <span class="text-sm text-gray-700">Payment Complete</span>
+            <input type="checkbox" v-model="filterStatus.ready" class="form-checkbox" />
+            <span class="text-sm text-gray-700">Owner actions complete</span>
           </label>
           <label class="flex items-center space-x-2 cursor-pointer">
             <input type="checkbox" v-model="filterStatus.shipped" class="form-checkbox" />
@@ -114,18 +120,19 @@
         <p><strong>Tags:</strong> {{ (item.tags || []).join(', ') }}</p>
         <p><strong>Location:</strong> {{ item.location }}</p>
         <p><strong>Date:</strong> {{ formatDate(item.found_at) }}</p>
+        <p v-if="item.verified && item.owner_name"><strong>Owner:</strong> {{ item.owner_name }}</p>
 
         <div class="tags">
           <span v-if="item.claim_initiated && !item.verified" class="tag orange">📨 Email sent</span>
           <span v-if="item.verified" class="tag green">🧍 Owner identified</span>
           <span v-if="item.shipping_confirmed" class="tag yellow">✅ T&Cs approved</span>
           <span v-if="item.payment_status === 'paid'" class="tag blue">💰 Paid</span>
-          <span v-if="item.shipped" class="tag dark">🚚 In transit</span>
-          <span v-if="item.delivered" class="tag teal">📬 Delivered</span>
+          <span v-if="item.shipped" class="tag dark" style="cursor:pointer" @click="openTracking(item)">🚚 In transit</span>
+          <span v-if="item.delivered" class="tag teal" style="cursor:pointer" @click="openTracking(item)">📬 Delivered</span>
         </div>
 
         <div v-if="!item.verified && !item.shipping_confirmed && item.payment_status !== 'paid' && !item.shipped && !item.delivered" class="claim-button-wrapper">
-          <button class="action-btn" @click="goToClaim(item.id)">
+          <button class="btn btn-primary btn-sm" @click="goToClaim(item.id)">
             Initiate Return Process
           </button>
         </div>
@@ -135,6 +142,47 @@
 
     <div v-if="zoomSrc" class="zoom-overlay" @click="zoomSrc = ''">
       <img :src="zoomSrc" class="zoomed-image" />
+    </div>
+    <div v-if="showTracking" class="modal-overlay" @click.self="closeTracking">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="text-lg font-semibold text-gray-900">Shipment Tracking</h3>
+          <button class="modal-close" @click="closeTracking">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <div class="text-sm text-gray-600">Carrier</div>
+              <div class="text-sm font-medium">{{ tracking.carrier }}</div>
+            </div>
+            <div>
+              <div class="text-sm text-gray-600">Tracking #</div>
+              <div class="text-sm font-medium">{{ tracking.number }}</div>
+            </div>
+            <div>
+              <div class="text-sm text-gray-600">Status</div>
+              <div class="text-sm font-medium">{{ tracking.status }}</div>
+            </div>
+            <div>
+              <div class="text-sm text-gray-600">ETA</div>
+              <div class="text-sm font-medium">{{ tracking.eta }}</div>
+            </div>
+          </div>
+          <div class="text-sm text-gray-700 mb-2">Recent updates</div>
+          <ul class="timeline">
+            <li v-for="(ev, idx) in tracking.events" :key="idx" class="timeline-item">
+              <div class="timeline-dot"></div>
+              <div class="timeline-content">
+                <div class="text-sm font-medium">{{ ev.title }}</div>
+                <div class="text-xs text-gray-500">{{ ev.time }} • {{ ev.location }}</div>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary btn-sm" @click="closeTracking">Close</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -155,14 +203,15 @@ const results = ref([])
 const error = ref('')
 const searched = ref(false)
 const zoomSrc = ref('')
+const showTracking = ref(false)
+const tracking = ref({ carrier: '', number: '', status: '', eta: '', events: [] })
+const useSemantic = ref(false)
 
 const filterStatus = ref({
-  verified: false,
-  shipping: false,
-  paid: false,
+  initiated: false,
+  ready: false,
   shipped: false,
   delivered: false,
-  initiated: false
 })
 
 const filteredResults = computed(() => {
@@ -172,11 +221,11 @@ const filteredResults = computed(() => {
   return results.value.filter(item => {
     if (!isAnyFilterOn) return true
 
+    const isReady = !!(item.verified && item.shipping_confirmed && item.payment_status === 'paid')
+
     return (
       (filters.initiated && item.claim_initiated && !item.verified) ||
-      (filters.verified && item.verified) ||
-      (filters.shipping && item.shipping_confirmed) ||
-      (filters.paid && item.payment_status === 'paid') ||
+      (filters.ready && isReady) ||
       (filters.shipped && item.shipped) ||
       (filters.delivered && item.delivered)
     )
@@ -215,6 +264,7 @@ async function submitSearch() {
       {
         keyword: keyword.value,
         embedding: embedding.value,
+        semantic: useSemantic.value,
         startDate: startDate.value,
         endDate: endDate.value
       },
@@ -235,6 +285,35 @@ async function submitSearch() {
 function formatDate(dateStr) {
   const date = new Date(dateStr)
   return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
+}
+
+function openTracking(item) {
+  const delivered = !!item.delivered
+  const now = new Date()
+  const fmt = d => new Date(d).toLocaleString()
+  const daysAgo = n => new Date(now.getTime() - n * 24 * 60 * 60 * 1000)
+
+  tracking.value = {
+    carrier: 'MockExpress',
+    number: `MOCK-${String(item.id).padStart(6, '0')}`,
+    status: delivered ? 'Delivered' : 'In Transit',
+    eta: delivered ? fmt(daysAgo(0)) : fmt(daysAgo(-1)),
+    events: delivered ? [
+      { title: 'Delivered', time: fmt(daysAgo(0)), location: item.location || 'Destination' },
+      { title: 'Out for delivery', time: fmt(daysAgo(0)), location: item.location || 'Local facility' },
+      { title: 'Arrived at local facility', time: fmt(daysAgo(1)), location: item.location || 'Hub' },
+      { title: 'Departed origin facility', time: fmt(daysAgo(2)), location: 'Origin facility' },
+    ] : [
+      { title: 'Arrived at local facility', time: fmt(daysAgo(0)), location: item.location || 'Hub' },
+      { title: 'Departed origin facility', time: fmt(daysAgo(1)), location: 'Origin facility' },
+      { title: 'Shipment created', time: fmt(daysAgo(2)), location: item.location || 'Origin' },
+    ]
+  }
+  showTracking.value = true
+}
+
+function closeTracking() {
+  showTracking.value = false
 }
 </script>
 
@@ -331,4 +410,33 @@ function formatDate(dateStr) {
 }
 
 .orange { background-color: #fff4e5; color: #92400e; }
+
+/* Tracking Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1100;
+}
+.modal-card {
+  background: #fff;
+  width: 100%;
+  max-width: 560px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+.modal-header, .modal-footer { padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; }
+.modal-header { border-bottom: 1px solid #eee; }
+.modal-footer { border-top: 1px solid #eee; }
+.modal-body { padding: 16px; }
+.modal-close { background: transparent; border: 0; font-size: 18px; cursor: pointer; }
+
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline-item { display: flex; gap: 10px; margin-bottom: 10px; }
+.timeline-dot { width: 10px; height: 10px; background: #3b82f6; border-radius: 9999px; margin-top: 6px; flex-shrink: 0; }
+.timeline-content { flex: 1; }
 </style>

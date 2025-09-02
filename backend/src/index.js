@@ -303,14 +303,30 @@ app.post('/api/items', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/search', authenticateToken, async (req, res) => {
-  const { keyword, startDate, endDate, embedding } = req.body;
+  let { keyword, startDate, endDate, embedding, semantic } = req.body;
 
   try {
     const params = [req.user.organization_id];
     let conditions = ['fi.organization_id = $1'];
     let similarityExpr = 'NULL';
 
-    if (keyword && keyword.trim().length > 0) {
+    // If semantic text search requested and no embedding provided, try to get a CLIP text embedding
+    let createdTextEmbedding = false;
+    if (!embedding && semantic && keyword && keyword.trim().length > 0) {
+      try {
+        const resp = await axios.post(`${ML_SERVICE_URL}/embed_text`, { text: keyword }, { timeout: 15000 });
+        if (Array.isArray(resp.data?.embedding) && resp.data.embedding.length === 512) {
+          embedding = resp.data.embedding;
+          createdTextEmbedding = true;
+        }
+      } catch (e) {
+        console.warn('[Semantic Text Embedding Error]', e?.message || e);
+        // Fall back silently to keyword LIKE if embedding fails
+      }
+    }
+
+    // Only add broad LIKE-based keyword filters when we didn't create a semantic text embedding
+    if (keyword && keyword.trim().length > 0 && !createdTextEmbedding) {
       const kw = `%${keyword.trim().toLowerCase()}%`;
 
       params.push(kw); // ocr_text
@@ -322,12 +338,37 @@ app.post('/api/search', authenticateToken, async (req, res) => {
       params.push(kw); // location
       const locIdx = params.length;
 
+      params.push(kw); // owner shipping name
+      const ownerNameIdx = params.length;
+
+      params.push(kw); // owner email
+      const ownerEmailIdx = params.length;
+
+      params.push(kw); // description
+      const descIdx = params.length;
+
       conditions.push(`(
         LOWER(ocr_text) LIKE $${ocrIdx}
         OR EXISTS (
           SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
         )
         OR LOWER(location) LIKE $${locIdx}
+        OR LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1))) LIKE $${ownerNameIdx}
+        OR LOWER(c.email) LIKE $${ownerEmailIdx}
+        OR LOWER(description) LIKE $${descIdx}
+      )`);
+    }
+
+    // In semantic mode, still allow owner name/email to be matched via LIKE
+    if (keyword && keyword.trim().length > 0 && createdTextEmbedding) {
+      const kw = `%${keyword.trim().toLowerCase()}%`;
+      params.push(kw); // owner name
+      const ownerNameIdx2 = params.length;
+      params.push(kw); // owner email
+      const ownerEmailIdx2 = params.length;
+      conditions.push(`(
+        LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1))) LIKE $${ownerNameIdx2}
+        OR LOWER(c.email) LIKE $${ownerEmailIdx2}
       )`);
     }
 
@@ -350,7 +391,10 @@ app.post('/api/search', authenticateToken, async (req, res) => {
     }
 
     const query = `
-      SELECT fi.*, c.claim_initiated, c.verified, c.shipping_confirmed, c.payment_status, c.shipped, ${similarityExpr} AS similarity
+      SELECT fi.*,
+             c.claim_initiated, c.verified, c.shipping_confirmed, c.payment_status, c.shipped,
+             CASE WHEN c.verified THEN COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1)) END AS owner_name,
+             ${similarityExpr} AS similarity
       FROM found_items fi
       LEFT JOIN claims c ON c.item_id = fi.id
       WHERE ${conditions.join(' AND ')}
@@ -505,6 +549,28 @@ app.get('/api/dashboard/summary', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[Dashboard Summary Error]', err);
     res.status(500).json({ error: 'Failed to load dashboard summary' });
+  }
+});
+
+// 🔔 Notifications summary (per-organization)
+app.get('/api/notifications/summary', authenticateToken, async (req, res) => {
+  try {
+    const orgId = req.user.organization_id;
+    const readyToShipQ = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM claims c
+       JOIN found_items fi ON fi.id = c.item_id
+       WHERE fi.organization_id = $1
+         AND c.verified = TRUE
+         AND c.shipping_confirmed = TRUE
+         AND c.payment_status = 'paid'
+         AND (c.shipped IS DISTINCT FROM TRUE)`,
+      [orgId]
+    );
+    res.json({ ready_to_ship: readyToShipQ.rows[0].count });
+  } catch (err) {
+    console.error('[Notifications Summary Error]', err);
+    res.status(500).json({ error: 'Failed to load notifications' });
   }
 });
 
