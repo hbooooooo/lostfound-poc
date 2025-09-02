@@ -31,8 +31,9 @@ This summary captures the current architecture, key endpoints, and recent change
 ## Data Model (relevant tables)
 - `organizations(id, name, origin_address JSONB?)`
 - `users(id, username, password, organization_id)`
-- `found_items(id, found_at, location, ocr_text, tags TEXT[], description, description_score, embedding vector(512), filename, organization_id, submitted_by)`
-- `claims(id UUID, item_id, email, token, token_expires, claim_initiated, verified, shipping_label, shipping_confirmed, payment_status, shipped, delivered, ...)`
+- `tag_vocabulary(label UNIQUE, lang, default_length_cm, default_width_cm, default_height_cm, default_weight_kg, default_is_document)`
+- `found_items(id, record_number, found_at, location, ocr_text, tags TEXT[], description, description_score, embedding vector(512), filename, length_cm, width_cm, height_cm, weight_kg, is_document, organization_id, submitted_by)`
+- `claims(id UUID, item_id, email, token, token_expires, claim_initiated, verified, shipping_label, shipping_confirmed, payment_status, shipped, delivered, shipping_address JSONB, ...)`
 
 Note: On startup, backend ensures `origin_address` exists and backfills any `found_items.organization_id IS NULL` to `DEFAULT_ORG_NAME` (default `TestOrg`).
 
@@ -44,21 +45,23 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
   - `POST /api/ocr` [multipart file] → calls ML at `${ML_SERVICE_URL}/ocr`. Returns `text`, `tags` (1 best), `embedding[512]`, `description`, `filename`.
   - `GET /api/ml/health` → backend → ML health proxy.
 - Items:
-  - `POST /api/items` (auth) → saves item (embeddings cast to `vector`, requires 512 dims).
-  - `POST /api/search` (auth) → filters by `req.user.organization_id`, optional keyword/date, optional embedding similarity.
+  - `POST /api/items` (auth) → saves item (embeddings cast to `vector`, requires 512 dims), generates and returns `{ id, record_number }`.
+  - `POST /api/search` (auth) → org‑scoped search combining keyword LIKE filters + semantic similarity. If no results: semantic‑only fallback; if no embedding: fuzzy LIKE fallback (pg_trgm). Ranking: text boost → fuzzy score → similarity.
   - `GET /api/items/:id` (auth) → restricted to caller’s org.
 - Dashboard & Notifications:
   - `GET /api/dashboard/summary` (auth) → org‑scoped stats + last 3 items.
   - `GET /api/notifications/summary` (auth) → `{ ready_to_ship }` count for bell indicator.
 - Tags:
-  - `GET /api/tags/vocabulary`
+  - `GET /api/tags/vocabulary` → labels only (ML vocabulary).
+  - `GET /api/tags/vocabulary/details` (auth) → labels + default dims.
+  - `POST /api/tags/vocabulary` (auth) → upsert label + default dims.
+  - `PUT /api/tags/vocabulary` (auth) → update defaults for a label.
   - `GET /api/tags/frequent` (auth, scoped by org)
-  - `POST /api/tags/vocabulary` (auth)
-  - `DELETE /api/tags/vocabulary` (auth)
 - Claims & Activity:
-  - `POST /api/claims/initiate` (auth) → restricted to caller’s org for the item.
+  - `POST /api/claims/initiate` (auth) → restricted to caller’s org; requires either L+W+H+weight or document+weight. Stores values on item.
   - `GET /api/claims/activity` (auth) → restricted to caller’s org.
   - `POST /api/claims/mark-shipped` (auth) → restricted to caller’s org.
+  - `POST /api/shipping/rates` → mock rating uses origin/destination + package details (document vs volumetric/actual weight).
 - Profile:
   - `GET /api/me` (auth) → id, username, organization_id, display_name, avatar.
   - `PUT /api/me` (auth) → update `display_name`.
@@ -71,12 +74,12 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
 
 ## Frontend Highlights
 - `Record.vue` (Upload & Process):
-  - HEIC handled client‑side via `heic2any` (JPEG conversion, size limits). Calls `/api/ocr`. Shows description/OCR/tags. Saves via `/api/items` (auth).
+  - HEIC handled client‑side via `heic2any` (JPEG conversion, size limits). Calls `/api/ocr`. Shows description/OCR; tags now inline next to AI confidence. Saves via `/api/items` (auth). Success shows record number.
 - `Activity.vue`: Uses `/api/search` to display items in two groups; marks shipped via `/api/claims/mark-shipped` (now auth + org check).
 - Headers (Desktop/Mobile): Show avatar if present, otherwise initial; bell shows red dot only when there are items ready to ship (uses `/api/notifications/summary`).
-- `ClaimForm.vue`: Loads item via `/api/items/:id` (now auth + org check), sends claim initiation.
+- `ClaimForm.vue` (Initiate Return): Loads item; prefills package details from first tag defaults when not present; requires dims+weight or document+weight; hides L/W/H when document; shows record # and source tag for defaults.
 - `OrganizationManagement.vue`: Uses admin org endpoints. Fixed DB mismatch on `origin_address` and corrected counts.
-- `TagAdmin.vue`: Tag list sorted A→Z; frequent tags loaded per org.
+- `TagAdmin.vue`: Manage labels + default dims; frequent tags per org. Uses `/api/tags/vocabulary/details`.
 - `Profile.vue`: Self‑service profile (display name, password with current‑password check, avatar upload with client‑side crop/resize).
 - `Login.vue`: Polished hero with sample image + gradient; fake “Forgot password?” modal.
 
@@ -103,13 +106,16 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
 - Notifications summary endpoint; bell red dot only when items are ready to ship.
 - Profile endpoints (`/api/me*`) and UI (avatar/name/password with current password).
 - Login page redesign with hero + fake reset modal; static samples served via `/samples` (Docker volume mounted).
-- Search UX: description included in keyword search; added owner_name display and searchability; optional closest‑match (semantic) text search using CLIP; merged status filters into “Owner actions complete”; clickable shipment tracking popup on In transit/Delivered; fixed overflow in Dashboard recent activity.
+- Search UX: combined semantic + keyword search with fallbacks; trigram fuzzy boost + GIN indexes; description included; owner_name search; merged status filters; shipment tracking popup; fixed Dashboard overflow.
+- Shipping/Returns: capture dims at Initiate Return; strict validation; mock rating accounts for doc vs volumetric/actual weight.
+- Tags: added default dims per tag; admin endpoints and UI.
+- Items: generated `record_number` for new items and backfilled for existing; displayed across Search, Activity, Claim.
 - Nginx upstream resolution stabilized with Docker DNS resolver; ML health + URL config.
 
 ## Known/Next
 - Tagging tweaks: consider synonyms (e.g., umbrella/brolly/parasol), per‑org priors, or uncertainty threshold for very low scores.
 - RBAC: add proper roles for admin endpoints.
-- Migrations: a proper migration system (instead of on‑route `ALTER TABLE`) if needed.
+- Migrations: move from on‑startup `ALTER TABLE` to a proper system.
 - Caching vocab: cache `/api/tags/vocabulary` in ml_service with periodic refresh.
 
 ## Quick Commands
