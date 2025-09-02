@@ -4,6 +4,8 @@ import axios from 'axios';
 import fs from 'fs';
 import FormData from 'form-data';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
@@ -21,7 +23,21 @@ import adminRoutes from './routes/admin_routes.js';
 import shippingRoutes from './routes/shipping_routes.js';
 
 const app = express();
-app.use(cors());
+app.use(helmet());
+const allowed = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || '';
+let corsOptions = {};
+if (allowed) {
+  const list = allowed.split(',').map(s => s.trim()).filter(Boolean);
+  corsOptions = {
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (list.includes(origin)) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true
+  };
+}
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
 app.use('/api', itemRoutes);
@@ -117,7 +133,8 @@ app.post('/api/signup', async (req, res) => {
 });
 
 // 🔐 Login
-app.post('/api/login', async (req, res) => {
+const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 20 });
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   try {
     const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
@@ -140,7 +157,8 @@ app.post('/api/login', async (req, res) => {
 });
 
 // 🧠 OCR
-app.post('/api/ocr', upload.single('file'), async (req, res) => {
+const ocrLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+app.post('/api/ocr', ocrLimiter, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -313,7 +331,8 @@ app.post('/api/items', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/search', authenticateToken, async (req, res) => {
+const searchLimiter = rateLimit({ windowMs: 60 * 1000, max: 120 });
+app.post('/api/search', authenticateToken, searchLimiter, async (req, res) => {
   // semantic flag is no longer required; we always try both methods for better UX
   let { keyword, startDate, endDate, embedding } = req.body;
 
@@ -734,6 +753,9 @@ app.listen(3000, () => {
     await pool.query("CREATE INDEX IF NOT EXISTS idx_found_items_location_trgm ON found_items USING gin (location gin_trgm_ops)");
     await pool.query("CREATE INDEX IF NOT EXISTS idx_claims_email_trgm ON claims USING gin (email gin_trgm_ops)");
     await pool.query("CREATE INDEX IF NOT EXISTS idx_claims_owner_name_trgm ON claims USING gin ((lower(coalesce(nullif(trim(shipping_address->>'name'), ''), split_part(email, '@', 1)))) gin_trgm_ops)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_found_items_tags_gin ON found_items USING gin (tags)");
+    // Optional vector index for similarity search (safe to ignore if small dataset)
+    try { await pool.query("CREATE INDEX IF NOT EXISTS found_items_embedding_ip_idx ON found_items USING ivfflat (embedding vector_ip_ops)"); } catch (e) { /* ignore if extension/config not ready */ }
     const orgName = process.env.DEFAULT_ORG_NAME || 'TestOrg';
     const orgRes = await pool.query('INSERT INTO organizations(name) VALUES($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id', [orgName]);
     const orgId = orgRes.rows[0].id;

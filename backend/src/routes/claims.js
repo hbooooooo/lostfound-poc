@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import dayjs from 'dayjs';
@@ -44,7 +45,8 @@ function authenticateToken(req, res, next) {
   });
 }
 
-router.post('/initiate', authenticateToken, async (req, res) => {
+const claimLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+router.post('/initiate', authenticateToken, claimLimiter, async (req, res) => {
   const { item_id, email, lang, length_cm, width_cm, height_cm, weight_kg, is_document } = req.body;
 
   if (!item_id || !email) {
