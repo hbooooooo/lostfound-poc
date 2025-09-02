@@ -79,6 +79,10 @@ function authenticateToken(req, res, next) {
 
 // 🔧 External services
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://ml_service';
+// Optional semantic similarity gate; set SEMANTIC_MIN_SIMILARITY env to enable (e.g., 0.12)
+const SEMANTIC_MIN_SIMILARITY = Number.isFinite(parseFloat(process.env.SEMANTIC_MIN_SIMILARITY))
+  ? parseFloat(process.env.SEMANTIC_MIN_SIMILARITY)
+  : null;
 
 // 🧾 Signup
 app.post('/api/signup', async (req, res) => {
@@ -275,12 +279,14 @@ app.post('/api/items', authenticateToken, async (req, res) => {
   }
 
   try {
-    await pool.query(
+    const insert = await pool.query(
       `INSERT INTO found_items (
         ocr_text, tags, embedding, location, found_at,
-        filename, description, description_score, organization_id, submitted_by
+        filename, description, description_score,
+        organization_id, submitted_by
       )
-      VALUES ($1, $2, $3::vector, $4, $5, $6, $7, $8, $9, $10)`,
+      VALUES ($1, $2, $3::vector, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id` ,
       [
         text,
         tags,
@@ -295,7 +301,12 @@ app.post('/api/items', authenticateToken, async (req, res) => {
       ]
     );
 
-    res.json({ status: 'ok' });
+    const newId = insert.rows[0].id;
+    // Generate human-friendly record number (R<org>-<id>)
+    const rec = `R${req.user.organization_id}-${newId}`;
+    await pool.query('UPDATE found_items SET record_number = $1 WHERE id = $2', [rec, newId]);
+
+    res.json({ status: 'ok', record_number: rec, id: newId });
   } catch (err) {
     console.error('[Insert Error]', err);
     res.status(500).json({ error: 'Insert failed' });
@@ -303,16 +314,13 @@ app.post('/api/items', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/search', authenticateToken, async (req, res) => {
-  let { keyword, startDate, endDate, embedding, semantic } = req.body;
+  // semantic flag is no longer required; we always try both methods for better UX
+  let { keyword, startDate, endDate, embedding } = req.body;
 
   try {
-    const params = [req.user.organization_id];
-    let conditions = ['fi.organization_id = $1'];
-    let similarityExpr = 'NULL';
-
-    // If semantic text search requested and no embedding provided, try to get a CLIP text embedding
+    // If no embedding provided and we have a keyword, try to get a CLIP text embedding
     let createdTextEmbedding = false;
-    if (!embedding && semantic && keyword && keyword.trim().length > 0) {
+    if (!embedding && keyword && keyword.trim().length > 0) {
       try {
         const resp = await axios.post(`${ML_SERVICE_URL}/embed_text`, { text: keyword }, { timeout: 15000 });
         if (Array.isArray(resp.data?.embedding) && resp.data.embedding.length === 512) {
@@ -325,84 +333,176 @@ app.post('/api/search', authenticateToken, async (req, res) => {
       }
     }
 
-    // Only add broad LIKE-based keyword filters when we didn't create a semantic text embedding
-    if (keyword && keyword.trim().length > 0 && !createdTextEmbedding) {
-      const kw = `%${keyword.trim().toLowerCase()}%`;
+    const buildQuery = (includeTextFilters, applyMinSimGate) => {
+      const params = [req.user.organization_id];
+      let conditions = ['fi.organization_id = $1'];
+      let similarityExpr = 'NULL';
+      let textBoostExpr = '0';
+      let fuzzyScoreExpr = '0.0';
 
-      params.push(kw); // ocr_text
-      const ocrIdx = params.length;
+      const hasKeyword = !!(keyword && keyword.trim().length > 0);
+      if (hasKeyword) {
+        // Plain keyword for trigram similarity scoring
+        const kwPlain = keyword.trim().toLowerCase();
+        params.push(kwPlain);
+        const trigIdx = params.length;
 
-      params.push(kw); // tags
-      const tagsIdx = params.length;
+        // Build fuzzy-score expression using pg_trgm similarity across fields
+        const ownerNameExpr = `LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1)))`;
+        const tagSimExpr = `(SELECT MAX(similarity(LOWER(t), $${trigIdx})) FROM unnest(tags) t)`;
+        fuzzyScoreExpr = `COALESCE(GREATEST(
+          similarity(LOWER(ocr_text), $${trigIdx}),
+          similarity(LOWER(description), $${trigIdx}),
+          similarity(LOWER(location), $${trigIdx}),
+          similarity(LOWER(c.email), $${trigIdx}),
+          similarity(${ownerNameExpr}, $${trigIdx}),
+          COALESCE(${tagSimExpr}, 0)
+        ), 0)`;
+      }
 
-      params.push(kw); // location
-      const locIdx = params.length;
+      if (includeTextFilters && hasKeyword) {
+        const kw = `%${keyword.trim().toLowerCase()}%`;
 
-      params.push(kw); // owner shipping name
-      const ownerNameIdx = params.length;
+        params.push(kw); // ocr_text
+        const ocrIdx = params.length;
 
-      params.push(kw); // owner email
-      const ownerEmailIdx = params.length;
+        params.push(kw); // tags
+        const tagsIdx = params.length;
 
-      params.push(kw); // description
-      const descIdx = params.length;
+        params.push(kw); // location
+        const locIdx = params.length;
 
-      conditions.push(`(
-        LOWER(ocr_text) LIKE $${ocrIdx}
-        OR EXISTS (
-          SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
-        )
-        OR LOWER(location) LIKE $${locIdx}
-        OR LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1))) LIKE $${ownerNameIdx}
-        OR LOWER(c.email) LIKE $${ownerEmailIdx}
-        OR LOWER(description) LIKE $${descIdx}
-      )`);
+        params.push(kw); // owner shipping name
+        const ownerNameIdx = params.length;
+
+        params.push(kw); // owner email
+        const ownerEmailIdx = params.length;
+
+        params.push(kw); // description
+        const descIdx = params.length;
+
+        const textMatch = `(
+          LOWER(ocr_text) LIKE $${ocrIdx}
+          OR EXISTS (
+            SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
+          )
+          OR LOWER(location) LIKE $${locIdx}
+          OR LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1))) LIKE $${ownerNameIdx}
+          OR LOWER(c.email) LIKE $${ownerEmailIdx}
+          OR LOWER(description) LIKE $${descIdx}
+        )`;
+        conditions.push(textMatch);
+        textBoostExpr = `CASE WHEN ${textMatch} THEN 1 ELSE 0 END`;
+      }
+
+      if (startDate) {
+        params.push(startDate + ' 00:00:00');
+        conditions.push(`found_at >= $${params.length}`);
+      }
+
+      if (endDate) {
+        params.push(endDate + ' 23:59:59.999');
+        conditions.push(`found_at <= $${params.length}`);
+      }
+
+      if (embedding && Array.isArray(embedding) && embedding.length === 512) {
+        const vectorLiteral = `[${embedding.join(',')}]`;
+        params.push(vectorLiteral);
+        similarityExpr = `(-(embedding <#> $${params.length}::vector))`;
+        if (applyMinSimGate && SEMANTIC_MIN_SIMILARITY !== null) {
+          params.push(SEMANTIC_MIN_SIMILARITY);
+          conditions.push(`${similarityExpr} >= $${params.length}`);
+        }
+      }
+
+      const query = `
+        SELECT fi.*,
+               c.claim_initiated, c.verified, c.shipping_confirmed, c.payment_status, c.shipped,
+               CASE WHEN c.verified THEN COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1)) END AS owner_name,
+               ${similarityExpr} AS similarity,
+               ${textBoostExpr}::int AS text_boost,
+               ${fuzzyScoreExpr}::real AS fuzzy_score
+        FROM found_items fi
+        LEFT JOIN claims c ON c.item_id = fi.id
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY ${embedding ? 'text_boost DESC, fuzzy_score DESC NULLS LAST, similarity DESC NULLS LAST' : 'text_boost DESC, fuzzy_score DESC NULLS LAST, found_at DESC'}
+        LIMIT 20
+      `;
+
+      return { query, params };
+    };
+
+    // First attempt: include text filters (broad LIKE) + semantic ranking if embedding exists
+    let { query, params } = buildQuery(true, true);
+    let result = await pool.query(query, params);
+
+    // Fallbacks with embedding and optional min similarity gate
+    if (result.rows.length === 0 && embedding && Array.isArray(embedding) && embedding.length === 512) {
+      // 2) same filters, no min-sim gate
+      ({ query, params } = buildQuery(true, false));
+      let r2 = await pool.query(query, params);
+      result = r2.rows.length ? r2 : result;
+
+      if (result.rows.length === 0) {
+        // 3) semantic-only with min-sim gate
+        ({ query, params } = buildQuery(false, true));
+        r2 = await pool.query(query, params);
+        result = r2.rows.length ? r2 : result;
+      }
+
+      if (result.rows.length === 0) {
+        // 4) semantic-only without gate
+        ({ query, params } = buildQuery(false, false));
+        r2 = await pool.query(query, params);
+        result = r2.rows.length ? r2 : result;
+      }
     }
 
-    // In semantic mode, still allow owner name/email to be matched via LIKE
-    if (keyword && keyword.trim().length > 0 && createdTextEmbedding) {
-      const kw = `%${keyword.trim().toLowerCase()}%`;
-      params.push(kw); // owner name
-      const ownerNameIdx2 = params.length;
-      params.push(kw); // owner email
-      const ownerEmailIdx2 = params.length;
-      conditions.push(`(
-        LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1))) LIKE $${ownerNameIdx2}
-        OR LOWER(c.email) LIKE $${ownerEmailIdx2}
-      )`);
+    // Fallback 2: if still no rows and we DON'T have an embedding, try a fuzzy LIKE pattern across text fields
+    if (result.rows.length === 0 && !(embedding && Array.isArray(embedding) && embedding.length === 512) && keyword && keyword.trim().length > 0) {
+      const letters = keyword.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (letters.length >= 3) {
+        const fuzzy = `%${letters.split('').join('%')}%`;
+        const params = [req.user.organization_id];
+        let conditions = ['fi.organization_id = $1'];
+
+        // OCR, tags, location, owner name/email, description
+        params.push(fuzzy); const ocrIdx = params.length;
+        params.push(fuzzy); const tagsIdx = params.length;
+        params.push(fuzzy); const locIdx = params.length;
+        params.push(fuzzy); const ownerNameIdx = params.length;
+        params.push(fuzzy); const ownerEmailIdx = params.length;
+        params.push(fuzzy); const descIdx = params.length;
+
+        conditions.push(`(
+          LOWER(ocr_text) LIKE $${ocrIdx}
+          OR EXISTS (
+            SELECT 1 FROM unnest(tags) t WHERE LOWER(t) LIKE $${tagsIdx}
+          )
+          OR LOWER(location) LIKE $${locIdx}
+          OR LOWER(COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1))) LIKE $${ownerNameIdx}
+          OR LOWER(c.email) LIKE $${ownerEmailIdx}
+          OR LOWER(description) LIKE $${descIdx}
+        )`);
+
+        if (startDate) { params.push(startDate + ' 00:00:00'); conditions.push(`found_at >= $${params.length}`); }
+        if (endDate) { params.push(endDate + ' 23:59:59.999'); conditions.push(`found_at <= $${params.length}`); }
+
+        const query = `
+          SELECT fi.*,
+                 c.claim_initiated, c.verified, c.shipping_confirmed, c.payment_status, c.shipped,
+                 CASE WHEN c.verified THEN COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1)) END AS owner_name,
+                 NULL AS similarity
+          FROM found_items fi
+          LEFT JOIN claims c ON c.item_id = fi.id
+          WHERE ${conditions.join(' AND ')}
+          ORDER BY found_at DESC
+          LIMIT 20`;
+        const r2 = await pool.query(query, params);
+        result = r2;
+      }
     }
 
-    if (startDate) {
-      // Start of day: YYYY-MM-DD 00:00:00
-      params.push(startDate + ' 00:00:00');
-      conditions.push(`found_at >= $${params.length}`);
-    }
-
-    if (endDate) {
-      // End of day: YYYY-MM-DD 23:59:59.999
-      params.push(endDate + ' 23:59:59.999');
-      conditions.push(`found_at <= $${params.length}`);
-    }
-
-    if (embedding && Array.isArray(embedding) && embedding.length === 512) {
-      const vectorLiteral = `[${embedding.join(',')}]`;
-      params.push(vectorLiteral);
-      similarityExpr = `(-(embedding <#> $${params.length}::vector))`;
-    }
-
-    const query = `
-      SELECT fi.*,
-             c.claim_initiated, c.verified, c.shipping_confirmed, c.payment_status, c.shipped,
-             CASE WHEN c.verified THEN COALESCE(NULLIF(TRIM(c.shipping_address->>'name'), ''), split_part(c.email, '@', 1)) END AS owner_name,
-             ${similarityExpr} AS similarity
-      FROM found_items fi
-      LEFT JOIN claims c ON c.item_id = fi.id
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY ${embedding ? 'similarity DESC NULLS LAST' : 'found_at DESC'}
-      LIMIT 20
-    `;
-
-    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
     console.error('[Search Error]', err);
@@ -415,9 +515,9 @@ app.post('/api/search', authenticateToken, async (req, res) => {
 // 🏷️ Expose vocabulary to ml_service
 app.get('/api/tags/vocabulary', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM tag_vocabulary');
-    const tags = result.rows.map(row => row.label);
-    res.json(tags);
+    const result = await pool.query('SELECT label FROM tag_vocabulary');
+    const labels = result.rows.map(row => row.label);
+    res.json(labels);
   } catch (err) {
     console.error('[Vocabulary Error]', err);
     res.status(500).json({ error: 'Failed to fetch tag vocabulary' });
@@ -443,9 +543,20 @@ app.get('/api/tags/frequent', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/tags/vocabulary', authenticateToken, async (req, res) => {
-  const { label } = req.body;
+  const { label, default_length_cm, default_width_cm, default_height_cm, default_weight_kg, default_is_document } = req.body;
   try {
-    await pool.query('INSERT INTO tag_vocabulary (label) VALUES ($1) ON CONFLICT DO NOTHING', [label.toLowerCase()]);
+    const low = label.toLowerCase();
+    await pool.query(
+      `INSERT INTO tag_vocabulary (label, default_length_cm, default_width_cm, default_height_cm, default_weight_kg, default_is_document)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (label) DO UPDATE SET 
+         default_length_cm = EXCLUDED.default_length_cm,
+         default_width_cm = EXCLUDED.default_width_cm,
+         default_height_cm = EXCLUDED.default_height_cm,
+         default_weight_kg = EXCLUDED.default_weight_kg,
+         default_is_document = EXCLUDED.default_is_document`,
+      [low, default_length_cm ?? null, default_width_cm ?? null, default_height_cm ?? null, default_weight_kg ?? null, typeof default_is_document === 'boolean' ? default_is_document : null]
+    );
     res.status(200).json({ success: true });
   } catch (err) {
     console.error('[Add Tag Error]', err);
@@ -461,6 +572,38 @@ app.delete('/api/tags/vocabulary', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('[Delete Tag Error]', err);
     res.status(500).json({ error: 'Failed to delete tag' });
+  }
+});
+
+// Detailed tag vocabulary for admin/editor with default package dimensions
+app.get('/api/tags/vocabulary/details', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT label, default_length_cm, default_width_cm, default_height_cm, default_weight_kg, default_is_document FROM tag_vocabulary ORDER BY label ASC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[Tag Details Error]', err);
+    res.status(500).json({ error: 'Failed to fetch tag details' });
+  }
+});
+
+app.put('/api/tags/vocabulary', authenticateToken, async (req, res) => {
+  const { label, default_length_cm, default_width_cm, default_height_cm, default_weight_kg, default_is_document } = req.body;
+  if (!label) return res.status(400).json({ error: 'Missing label' });
+  try {
+    await pool.query(
+      `UPDATE tag_vocabulary SET
+         default_length_cm = $2,
+         default_width_cm = $3,
+         default_height_cm = $4,
+         default_weight_kg = $5,
+         default_is_document = $6
+       WHERE label = $1`,
+      [label.toLowerCase(), default_length_cm ?? null, default_width_cm ?? null, default_height_cm ?? null, default_weight_kg ?? null, typeof default_is_document === 'boolean' ? default_is_document : null]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Update Tag Error]', err);
+    res.status(500).json({ error: 'Failed to update tag' });
   }
 });
 
@@ -583,6 +726,14 @@ app.listen(3000, () => {
 // On startup, ensure TestOrg exists and backfill null organization_ids
 (async function ensureOrgBackfill() {
   try {
+    // Ensure pg_trgm extension for fuzzy search
+    await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    // Create trigram indexes if missing (safe to run repeatedly)
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_found_items_ocr_text_trgm ON found_items USING gin (ocr_text gin_trgm_ops)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_found_items_description_trgm ON found_items USING gin (description gin_trgm_ops)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_found_items_location_trgm ON found_items USING gin (location gin_trgm_ops)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_claims_email_trgm ON claims USING gin (email gin_trgm_ops)");
+    await pool.query("CREATE INDEX IF NOT EXISTS idx_claims_owner_name_trgm ON claims USING gin ((lower(coalesce(nullif(trim(shipping_address->>'name'), ''), split_part(email, '@', 1)))) gin_trgm_ops)");
     const orgName = process.env.DEFAULT_ORG_NAME || 'TestOrg';
     const orgRes = await pool.query('INSERT INTO organizations(name) VALUES($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id', [orgName]);
     const orgId = orgRes.rows[0].id;
@@ -590,6 +741,29 @@ app.listen(3000, () => {
     if (upd.rowCount > 0) {
       console.log(`🔧 Backfilled ${upd.rowCount} items to organization ${orgName} (id=${orgId})`);
     }
+
+    // Ensure shipping-related columns exist
+    await pool.query("ALTER TABLE found_items ADD COLUMN IF NOT EXISTS length_cm REAL");
+    await pool.query("ALTER TABLE found_items ADD COLUMN IF NOT EXISTS width_cm REAL");
+    await pool.query("ALTER TABLE found_items ADD COLUMN IF NOT EXISTS height_cm REAL");
+    await pool.query("ALTER TABLE found_items ADD COLUMN IF NOT EXISTS weight_kg REAL");
+    await pool.query("ALTER TABLE found_items ADD COLUMN IF NOT EXISTS is_document BOOLEAN");
+    await pool.query("ALTER TABLE found_items ADD COLUMN IF NOT EXISTS record_number TEXT");
+    await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS uniq_found_items_record_number ON found_items(record_number) WHERE record_number IS NOT NULL");
+
+    // Backfill record numbers for existing items
+    await pool.query(
+      `UPDATE found_items fi
+       SET record_number = 'R' || fi.organization_id || '-' || fi.id
+       WHERE fi.record_number IS NULL AND fi.organization_id IS NOT NULL`
+    );
+
+    // Ensure tag_vocabulary default dimension columns exist
+    await pool.query("ALTER TABLE tag_vocabulary ADD COLUMN IF NOT EXISTS default_length_cm REAL");
+    await pool.query("ALTER TABLE tag_vocabulary ADD COLUMN IF NOT EXISTS default_width_cm REAL");
+    await pool.query("ALTER TABLE tag_vocabulary ADD COLUMN IF NOT EXISTS default_height_cm REAL");
+    await pool.query("ALTER TABLE tag_vocabulary ADD COLUMN IF NOT EXISTS default_weight_kg REAL");
+    await pool.query("ALTER TABLE tag_vocabulary ADD COLUMN IF NOT EXISTS default_is_document BOOLEAN");
   } catch (e) {
     console.warn('Org backfill skipped:', e.message);
   }

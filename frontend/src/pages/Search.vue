@@ -19,20 +19,7 @@
                 placeholder="Keywords, tags, location..." 
                 class="form-input" 
               />
-              <label class="mt-2 inline-flex items-center space-x-2">
-                <input type="checkbox" v-model="useSemantic" class="form-checkbox" />
-                <span class="text-sm text-gray-600">Use closest match instead of exact</span>
-                <svg
-                  class="w-4 h-4 text-gray-400 hover:text-gray-600 cursor-help"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  xmlns="http://www.w3.org/2000/svg"
-                  :title="'Find by meaning, not exact words. Ranks closest matches; helpful for synonyms (e.g., “rucksack” ≈ “backpack”).'"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 18a6 6 0 100-12 6 6 0 000 12z"></path>
-                </svg>
-              </label>
+              <!-- Semantic is always applied in backend; no toggle needed -->
             </div>
             <div>
               <label class="form-label">Start Date</label>
@@ -115,11 +102,16 @@
           @click="zoomImage(`/uploads/${item.filename}`)"
         />
       <div class="result-details">
-        <h3>{{ item.description }}</h3>
+        <div class="flex items-start justify-between gap-3">
+          <h3 class="m-0">{{ item.description || 'Found Item' }}</h3>
+          <div class="text-right">
+            <div v-if="item.record_number" class="text-xs text-gray-700"># {{ item.record_number }}</div>
+            <div class="text-xs text-gray-500">{{ formatDate(item.found_at) }}</div>
+          </div>
+        </div>
         <p><strong>OCR:</strong> {{ item.ocr_text }}</p>
         <p><strong>Tags:</strong> {{ (item.tags || []).join(', ') }}</p>
         <p><strong>Location:</strong> {{ item.location }}</p>
-        <p><strong>Date:</strong> {{ formatDate(item.found_at) }}</p>
         <p v-if="item.verified && item.owner_name"><strong>Owner:</strong> {{ item.owner_name }}</p>
 
         <div class="tags">
@@ -205,7 +197,7 @@ const searched = ref(false)
 const zoomSrc = ref('')
 const showTracking = ref(false)
 const tracking = ref({ carrier: '', number: '', status: '', eta: '', events: [] })
-const useSemantic = ref(false)
+// Semantic search is always attempted server-side for better UX
 
 const filterStatus = ref({
   initiated: false,
@@ -264,7 +256,6 @@ async function submitSearch() {
       {
         keyword: keyword.value,
         embedding: embedding.value,
-        semantic: useSemantic.value,
         startDate: startDate.value,
         endDate: endDate.value
       },

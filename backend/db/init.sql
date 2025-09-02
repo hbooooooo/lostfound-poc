@@ -1,6 +1,14 @@
 -- 0. Required extensions
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Trigram indexes to speed LIKE/similarity across common text fields
+CREATE INDEX IF NOT EXISTS idx_found_items_ocr_text_trgm ON found_items USING gin (ocr_text gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_found_items_description_trgm ON found_items USING gin (description gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_found_items_location_trgm ON found_items USING gin (location gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_claims_email_trgm ON claims USING gin (email gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_claims_owner_name_trgm ON claims USING gin ((lower(coalesce(nullif(trim(shipping_address->>'name'), ''), split_part(email, '@', 1)))) gin_trgm_ops);
 
 -- 1. Organizations table
 CREATE TABLE IF NOT EXISTS organizations (
@@ -21,13 +29,19 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS tag_vocabulary (
     id SERIAL PRIMARY KEY,
     label TEXT NOT NULL UNIQUE,
-    lang TEXT DEFAULT 'en'
+    lang TEXT DEFAULT 'en',
+    default_length_cm REAL,
+    default_width_cm REAL,
+    default_height_cm REAL,
+    default_weight_kg REAL,
+    default_is_document BOOLEAN
 );
 
 -- 4. Found items table
 CREATE TABLE IF NOT EXISTS found_items (
     id SERIAL PRIMARY KEY,
     found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    record_number TEXT,
     location TEXT,
     ocr_text TEXT,
     tags TEXT[],
@@ -35,9 +49,18 @@ CREATE TABLE IF NOT EXISTS found_items (
     description_score REAL,
     embedding vector(512),
     filename TEXT,
+    -- Shipping-related estimates
+    length_cm REAL,
+    width_cm REAL,
+    height_cm REAL,
+    weight_kg REAL,
+    is_document BOOLEAN,
     organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL,
     submitted_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
+
+-- Ensure uniqueness of record numbers when present
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_found_items_record_number ON found_items(record_number) WHERE record_number IS NOT NULL;
 
 -- 5. Claims table
 CREATE TABLE IF NOT EXISTS claims (

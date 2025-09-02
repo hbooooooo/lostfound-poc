@@ -66,6 +66,13 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div class="flex items-center text-gray-600">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18" />
+                    </svg>
+                    <span class="font-medium">Record #:</span>
+                    <span class="ml-1">{{ item.record_number || '—' }}</span>
+                  </div>
+                  <div class="flex items-center text-gray-600">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
@@ -115,6 +122,49 @@
         </div>
       </div>
 
+      <!-- Package Details -->
+      <div class="card">
+        <div class="card-header">
+          <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+            <svg class="w-5 h-5 mr-2 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V7a2 2 0 00-2-2h-2.586a1 1 0 01-.707-.293l-1.414-1.414A2 2 0 0011.172 1H8a2 2 0 00-2 2v10m6-7h8m-8 4h8M3 13a4 4 0 104 4H7a4 4 0 10-4-4z" />
+            </svg>
+            Package Details (required)
+          </h2>
+        </div>
+        <div class="card-body">
+          <div class="space-y-4">
+            <label class="inline-flex items-center space-x-2">
+              <input type="checkbox" v-model="isDocument" class="form-checkbox" />
+              <span class="text-sm text-gray-700">Document only (flat envelope, ignore dimensions)</span>
+            </label>
+            <div v-if="!isDocument" class="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div>
+                <label class="form-label">Length (cm) <span class="text-red-500">*</span></label>
+                <input ref="lengthInput" type="number" step="0.1" min="0" v-model.number="lengthCm" required class="form-input" />
+              </div>
+              <div>
+                <label class="form-label">Width (cm) <span class="text-red-500">*</span></label>
+                <input ref="widthInput" type="number" step="0.1" min="0" v-model.number="widthCm" required class="form-input" />
+              </div>
+              <div>
+                <label class="form-label">Height (cm) <span class="text-red-500">*</span></label>
+                <input ref="heightInput" type="number" step="0.1" min="0" v-model.number="heightCm" required class="form-input" />
+              </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <label class="form-label">Weight (kg) <span class="text-red-500">*</span></label>
+                <input ref="weightInput" type="number" step="0.01" min="0" v-model.number="weightKg" required class="form-input" />
+              </div>
+            </div>
+            <p class="text-xs text-gray-500">Required to estimate shipping. Either provide all dimensions and weight, or check "Document only" and provide weight.</p>
+            <p v-if="prefillTag" class="text-xs text-gray-500">Defaults prefilled from tag: <span class="font-medium">{{ prefillTag }}</span></p>
+            <p v-if="pkgError" class="text-sm text-red-600">{{ pkgError }}</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Claim Form -->
       <div class="card">
         <div class="card-header">
@@ -126,7 +176,7 @@
           </h2>
         </div>
         <div class="card-body">
-          <form @submit.prevent="submitClaim" class="space-y-6">
+          <form ref="claimForm" @submit.prevent="submitClaim" class="space-y-6">
             <!-- Contact Information -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
@@ -285,11 +335,25 @@ const route = useRoute()
 const router = useRouter()
 const itemId = route.params.item_id
 
-const item = ref(null)
-const email = ref('')
-const lang = ref('en')
-const subject = ref('')
-const body = ref('')
+  const item = ref(null)
+  const claimForm = ref(null)
+  const email = ref('')
+  const lang = ref('en')
+  const subject = ref('')
+  const body = ref('')
+  // Package details
+  const isDocument = ref(false)
+  const lengthCm = ref(null)
+  const widthCm = ref(null)
+  const heightCm = ref(null)
+  const weightKg = ref(null)
+  const pkgError = ref('')
+  const tagDetails = ref([])
+  const prefillTag = ref('')
+  const lengthInput = ref(null)
+  const widthInput = ref(null)
+  const heightInput = ref(null)
+  const weightInput = ref(null)
 const error = ref('')
 const success = ref('')
 const sending = ref(false)
@@ -326,6 +390,37 @@ onMounted(async () => {
       }
     })
     item.value = res.data
+    // Prefill from item's first tag defaults if present
+    try {
+      const det = await axios.get('/api/tags/vocabulary/details', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+      tagDetails.value = det.data || []
+      const firstRaw = (item.value.tags && item.value.tags[0]) ? String(item.value.tags[0]) : ''
+      const first = firstRaw.toLowerCase()
+      const meta = tagDetails.value.find(t => t.label === first)
+      if (meta) {
+        prefillTag.value = firstRaw
+        // Only prefill if not already set on item
+        if (typeof item.value.is_document === 'boolean') {
+          isDocument.value = item.value.is_document
+        } else {
+          isDocument.value = !!meta.default_is_document
+        }
+        if (!isDocument.value) {
+          if (typeof item.value.length_cm === 'number') lengthCm.value = item.value.length_cm
+          else if (typeof meta.default_length_cm === 'number') lengthCm.value = meta.default_length_cm
+          if (typeof item.value.width_cm === 'number') widthCm.value = item.value.width_cm
+          else if (typeof meta.default_width_cm === 'number') widthCm.value = meta.default_width_cm
+          if (typeof item.value.height_cm === 'number') heightCm.value = item.value.height_cm
+          else if (typeof meta.default_height_cm === 'number') heightCm.value = meta.default_height_cm
+        } else {
+          lengthCm.value = widthCm.value = heightCm.value = null
+        }
+        if (typeof item.value.weight_kg === 'number') weightKg.value = item.value.weight_kg
+        else if (typeof meta.default_weight_kg === 'number') weightKg.value = meta.default_weight_kg
+      }
+    } catch {}
 
     // Load email template
     await loadTemplate(lang.value)
@@ -348,9 +443,31 @@ function previewEmail() {
   showPreview.value = true
 }
 
-async function submitClaim() {
+  async function submitClaim() {
   if (sending.value) return
   
+  // Validate package data before sending
+  pkgError.value = ''
+  const pos = n => typeof n === 'number' && n > 0
+  if (isDocument.value) {
+    if (!pos(weightKg.value)) {
+      pkgError.value = 'Weight (kg) is required and must be greater than zero for document shipments.'
+      weightInput.value?.focus()
+      claimForm.value?.reportValidity()
+      return
+    }
+  } else {
+    if (!(pos(lengthCm.value) && pos(widthCm.value) && pos(heightCm.value) && pos(weightKg.value))) {
+      pkgError.value = 'Please provide length, width, height, and weight (all > 0), or select Document only.'
+      if (!pos(lengthCm.value)) lengthInput.value?.focus()
+      else if (!pos(widthCm.value)) widthInput.value?.focus()
+      else if (!pos(heightCm.value)) heightInput.value?.focus()
+      else weightInput.value?.focus()
+      claimForm.value?.reportValidity()
+      return
+    }
+  }
+
   sending.value = true
   error.value = ''
   
@@ -360,7 +477,12 @@ async function submitClaim() {
       email: email.value,
       lang: lang.value,
       subject: subject.value,
-      body: body.value
+      body: body.value,
+      is_document: isDocument.value,
+      length_cm: isDocument.value ? null : (typeof lengthCm.value === 'number' ? lengthCm.value : null),
+      width_cm: isDocument.value ? null : (typeof widthCm.value === 'number' ? widthCm.value : null),
+      height_cm: isDocument.value ? null : (typeof heightCm.value === 'number' ? heightCm.value : null),
+      weight_kg: (typeof weightKg.value === 'number' ? weightKg.value : null)
     }, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('token')}`

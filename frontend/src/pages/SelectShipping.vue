@@ -257,49 +257,16 @@ onMounted(async () => {
     const claimRes = await axios.get(`/api/claims/verify?token=${token}`)
     item.value = claimRes.data.claim
 
-    // For now, use fake shipping options for demo purposes
-    // TODO: Replace with real API call when ready
-    shippingOptions.value = [
-      {
-        id: 'standard',
-        label: 'Standard Shipping',
-        description: '5-7 business days delivery',
-        price: 9.99,
-        carrier: 'Standard Post',
-        estimated_days: '5-7'
-      },
-      {
-        id: 'express',
-        label: 'Express Shipping',
-        description: '2-3 business days delivery',
-        price: 18.99,
-        carrier: 'Express Courier',
-        estimated_days: '2-3'
-      },
-      {
-        id: 'overnight',
-        label: 'Priority Overnight',
-        description: 'Next business day delivery',
-        price: 29.99,
-        carrier: 'Priority Express',
-        estimated_days: '1'
-      }
-    ]
-
-    // Mock shipping info for display
+    // Request shipping rates from backend using token + address
+    const rateRes = await axios.post('/api/shipping/rates', {
+      token,
+      shipping_address: userAddress.value
+    })
+    shippingOptions.value = rateRes.data.rates || []
     shippingInfo.value = {
-      origin: {
-        organization: 'Hotel Example',
-        address: {
-          street: '123 Hotel Street',
-          city: 'Paris',
-          postalCode: '75001',
-          country: 'FR'
-        }
-      },
-      destination: userAddress.value
+      origin: rateRes.data.origin,
+      destination: rateRes.data.destination
     }
-
   } catch (err) {
     error.value = err.response?.data?.error || 'Unable to load shipping options.'
   } finally {

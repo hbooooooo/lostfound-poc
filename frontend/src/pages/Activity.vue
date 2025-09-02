@@ -42,7 +42,10 @@
               @click="zoomImage(`/uploads/${item.filename}`)" />
             <div class="flex-1 min-w-0">
               <div class="flex justify-between items-start mb-2">
-                <h3 class="text-lg font-medium text-gray-900 truncate">{{ item.description }}</h3>
+                <div class="flex items-center gap-3 min-w-0">
+                  <h3 class="text-lg font-medium text-gray-900 truncate">{{ item.description }}</h3>
+                  <span v-if="item.record_number" class="text-xs text-gray-700 whitespace-nowrap"># {{ item.record_number }}</span>
+                </div>
                 <div class="flex flex-wrap gap-1 ml-2">
                   <span class="badge badge-success">Owner ID'd</span>
                   <span class="badge badge-info">T&Cs OK</span>
@@ -109,7 +112,10 @@
               @click="zoomImage(`/uploads/${item.filename}`)" />
             <div class="flex-1 min-w-0">
               <div class="flex justify-between items-start mb-2">
-                <h3 class="text-lg font-medium text-gray-900 truncate">{{ item.description }}</h3>
+                <div class="flex items-center gap-3 min-w-0">
+                  <h3 class="text-lg font-medium text-gray-900 truncate">{{ item.description }}</h3>
+                  <span v-if="item.record_number" class="text-xs text-gray-700 whitespace-nowrap"># {{ item.record_number }}</span>
+                </div>
                 <span class="badge badge-warning ml-2 flex-shrink-0">Pending Contact</span>
               </div>
               <div class="space-y-1 text-sm text-gray-600 mb-3">
