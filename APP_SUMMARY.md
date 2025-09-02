@@ -103,6 +103,7 @@ Note: On startup, backend ensures `origin_address` exists and backfills any `fou
 - Notifications summary endpoint; bell red dot only when items are ready to ship.
 - Profile endpoints (`/api/me*`) and UI (avatar/name/password with current password).
 - Login page redesign with hero + fake reset modal; static samples served via `/samples` (Docker volume mounted).
+- Search UX: description included in keyword search; added owner_name display and searchability; optional closest‑match (semantic) text search using CLIP; merged status filters into “Owner actions complete”; clickable shipment tracking popup on In transit/Delivered; fixed overflow in Dashboard recent activity.
 - Nginx upstream resolution stabilized with Docker DNS resolver; ML health + URL config.
 
 ## Known/Next
